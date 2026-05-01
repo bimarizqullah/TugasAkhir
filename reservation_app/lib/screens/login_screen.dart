@@ -271,7 +271,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   size: 44, color: Colors.white),
             ),
             const SizedBox(height: 14),
-            const Text('Billiard Booking',
+            const Text('Etan Patung Booking',
                 style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,
