@@ -1,0 +1,13 @@
+[90m= [39m[34;4mApp\Models\User[39;24m {#7465
+    [34mid[39m: [35m1[39m,
+    [34mphoto_path[39m: "[32mavatars/iJaDaL9Ar00OyOmnlPqpoJaBHesDnFQR4nFXSucd.jpg[39m",
+    [34mname[39m: "[32mAdmin Bima[39m",
+    [34memail[39m: "[32madmin.bima@billing.com[39m",
+    #[33mpassword[39m: "[32m$2y$12$FKCQuxXohFIGncKVptLvvuKHvyYFFI2KaTlUNgWeRo9Dlblx/KMJK[39m",
+    [34muser_role[39m: "[32msuperadmin[39m",
+    [34mstatus[39m: "[32maktif[39m",
+    #[33mremember_token[39m: [36mnull[39m,
+    [34mcreated_at[39m: "[32m2026-03-11 21:12:12[39m",
+    [34mupdated_at[39m: "[32m2026-03-12 10:52:58[39m",
+  }
+

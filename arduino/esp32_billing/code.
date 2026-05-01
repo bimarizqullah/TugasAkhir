@@ -1,0 +1,262 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+// ================= WIFI =================
+const char* WIFI_SSID = "MHS-PNM";
+const char* WIFI_PASSWORD = "akupoltek";
+
+// ================= API ==================
+const char* API_HOST = "http://192.168.1.9:8000";
+const int TABLE_ID = 1;
+
+// ================= PIN ==================
+#define RELAY_PIN 4
+#define LED_PIN   2
+
+// P10 HUB12
+#define P10_DR   33
+#define P10_CLK  26
+#define P10_LAT  25
+#define P10_OE   13
+#define P10_A    14
+#define P10_B    27
+
+// ================= PANEL =================
+#define PANEL_W 32
+#define PANEL_H 16
+#define ROW_GROUPS 4
+
+uint8_t framebuf[PANEL_H][PANEL_W / 8];
+
+// ================= FONT ==================
+const uint8_t font3x5[][3] = {
+  {0x1F,0x11,0x1F},{0x00,0x1F,0x00},{0x1D,0x15,0x17},
+  {0x11,0x15,0x1F},{0x07,0x04,0x1F},{0x17,0x15,0x1D},
+  {0x1F,0x15,0x1D},{0x01,0x01,0x1F},{0x1F,0x15,0x1F},
+  {0x17,0x15,0x1F}
+};
+const uint8_t fontDash[3] = {0x04,0x04,0x04};
+
+// ================= STATE =================
+bool relayState = false;
+unsigned long lastPoll = 0;
+
+// TIMER
+uint32_t sessionStartMillis = 0;
+bool sessionActive = false;
+int dispH=0, dispM=0, dispS=0;
+
+// ================= P10 ===================
+void p10_init(){
+  pinMode(P10_DR,OUTPUT);
+  pinMode(P10_CLK,OUTPUT);
+  pinMode(P10_LAT,OUTPUT);
+  pinMode(P10_OE,OUTPUT);
+  pinMode(P10_A,OUTPUT);
+  pinMode(P10_B,OUTPUT);
+
+  digitalWrite(P10_OE,HIGH);
+  memset(framebuf,0xFF,sizeof(framebuf));
+}
+
+void shiftOutByte(uint8_t data){
+  for(int i=7;i>=0;i--){
+    digitalWrite(P10_DR,(data>>i)&1);
+    digitalWrite(P10_CLK,HIGH);
+    digitalWrite(P10_CLK,LOW);
+  }
+}
+
+void scanRow(uint8_t g){
+  digitalWrite(P10_OE,HIGH);
+  for(int r=0;r<4;r++){
+    int row=g+(r*ROW_GROUPS);
+    for(int b=(PANEL_W/8)-1;b>=0;b--)
+      shiftOutByte(framebuf[row][b]);
+  }
+  digitalWrite(P10_LAT,HIGH);
+  digitalWrite(P10_LAT,LOW);
+
+  digitalWrite(P10_A,(g>>0)&1);
+  digitalWrite(P10_B,(g>>1)&1);
+
+  digitalWrite(P10_OE,LOW);
+}
+
+void refreshDisplay(){
+  for(int g=0;g<ROW_GROUPS;g++){
+    scanRow(g);
+    delayMicroseconds(500);
+  }
+}
+
+void clearDisplay(){
+  memset(framebuf,0xFF,sizeof(framebuf));
+}
+
+void setPixel(int x,int y,bool on){
+  if(x<0||x>=32||y<0||y>=16)return;
+  if(on) framebuf[y][x/8]&=~(0x80>>(x%8));
+  else   framebuf[y][x/8]|=(0x80>>(x%8));
+}
+
+// ================= RENDER =================
+void drawDigit(int x,int y,int d,const uint8_t* f=nullptr){
+  const uint8_t* data = f ? f : font3x5[d];
+  for(int c=0;c<3;c++){
+    for(int r=0;r<5;r++){
+      setPixel(x+c,y+r,(data[c]>>r)&1);
+    }
+  }
+}
+
+void drawColon(int x,int y,bool on){
+  setPixel(x,y+1,on);
+  setPixel(x,y+3,on);
+}
+
+void drawClock(int h,int m,int s){
+  clearDisplay();
+  bool blink = (s%2==0);
+
+  int ox=2, oy=5;
+
+  drawDigit(ox,oy,h/10);
+  drawDigit(ox+4,oy,h%10);
+  drawColon(ox+8,oy,blink);
+  drawDigit(ox+10,oy,m/10);
+  drawDigit(ox+14,oy,m%10);
+  drawColon(ox+18,oy,blink);
+  drawDigit(ox+20,oy,s/10);
+  drawDigit(ox+24,oy,s%10);
+}
+
+void drawIdle(){
+  clearDisplay();
+  int ox=2, oy=5;
+
+  drawDigit(ox,oy,0,fontDash);
+  drawDigit(ox+4,oy,0,fontDash);
+  drawColon(ox+8,oy,true);
+  drawDigit(ox+10,oy,0,fontDash);
+  drawDigit(ox+14,oy,0,fontDash);
+  drawColon(ox+18,oy,true);
+  drawDigit(ox+20,oy,0,fontDash);
+  drawDigit(ox+24,oy,0,fontDash);
+}
+
+// ================= TIMER =================
+void startSession(){
+  sessionStartMillis = millis();
+  sessionActive = true;
+}
+
+void stopSession(){
+  sessionActive = false;
+}
+
+void updateTimer(){
+  if(!sessionActive) return;
+
+  uint32_t t = (millis()-sessionStartMillis)/1000;
+  dispH = t/3600;
+  dispM = (t%3600)/60;
+  dispS = t%60;
+}
+
+// ================= WIFI ==================
+void connectWiFi(){
+  WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
+
+  Serial.print("Connecting WiFi");
+  while(WiFi.status()!=WL_CONNECTED){
+    drawIdle();
+    refreshDisplay();
+    delay(300);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected!");
+  Serial.println(WiFi.localIP());
+}
+
+// ================= API ===================
+void checkTableStatus(){
+  if(WiFi.status()!=WL_CONNECTED) return;
+
+  HTTPClient http;
+  String url = String(API_HOST)+"/api/table-status/"+TABLE_ID;
+
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if(httpCode==200){
+    String payload = http.getString();
+
+    JsonDocument doc;
+    deserializeJson(doc,payload);
+
+    bool active = doc["active"];
+
+    if(active && !relayState){
+      Serial.println("💡 RELAY ON");
+
+      digitalWrite(RELAY_PIN,LOW);   // ACTIVE LOW
+      digitalWrite(LED_PIN,HIGH);
+
+      relayState=true;
+      startSession();
+
+    } else if(!active && relayState){
+      Serial.println("🔌 RELAY OFF");
+
+      digitalWrite(RELAY_PIN,HIGH);
+      digitalWrite(LED_PIN,LOW);
+
+      relayState=false;
+      stopSession();
+    }
+  }
+
+  http.end();
+}
+
+// ================= SETUP =================
+void setup(){
+  Serial.begin(115200);
+
+  pinMode(RELAY_PIN,OUTPUT);
+  pinMode(LED_PIN,OUTPUT);
+
+  digitalWrite(RELAY_PIN,HIGH); // OFF
+  digitalWrite(LED_PIN,LOW);
+
+  p10_init();
+  drawIdle();
+
+  connectWiFi();
+}
+
+// ================= LOOP ==================
+void loop(){
+
+  if(WiFi.status()!=WL_CONNECTED){
+    connectWiFi();
+  }
+
+  if(millis()-lastPoll>2000){
+    lastPoll=millis();
+    checkTableStatus();
+  }
+
+  updateTimer();
+
+  if(sessionActive){
+    drawClock(dispH,dispM,dispS);
+  } else {
+    drawIdle();
+  }
+
+  refreshDisplay();
+}
