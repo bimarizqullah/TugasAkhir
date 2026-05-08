@@ -1,18 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // 1. Import package dotenv
 import 'package:reservation_app/widgets/main_shell.dart';
-import 'screens/login_screen.dart';
+import 'utils/responsive_helper.dart';
+import 'screens/mobile/login_screen.dart';
+import 'screens/web/login_web_screen.dart';
 import 'services/websocket_service.dart';
 import 'utils/page_transitions.dart';
 
-void main() {
+// 2. Ubah main menjadi Future dan async
+Future<void> main() async {
+  // 3. Pastikan inisialisasi binding dilakukan di awal
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 4. Load file .env dari root project
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    // Opsional: print error jika file .env lupa ditaruh atau belum didaftarkan di pubspec
+    debugPrint("Error loading .env file: $e");
+  }
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor        : Colors.transparent,
+      statusBarColor         : Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+  
   runApp(const MyApp());
 }
 
@@ -52,7 +67,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       theme: ThemeData(
         colorScheme  : ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
         useMaterial3 : true,
-        // Animasi default untuk semua Navigator.pushNamed
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: {
             TargetPlatform.android: _SlideTransitionBuilder(),
@@ -61,15 +75,31 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
       ),
       initialRoute: '/login',
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/home' : (context) => const MainShell(),
+      onGenerateRoute: (settings) {
+        switch (settings.name) {
+          case '/login':
+            return MaterialPageRoute(
+              builder: (context) => ResponsiveHelper.isWeb(context)
+                  ? const LoginWebScreen()
+                  : const LoginScreen(),
+            );
+          case '/home':
+            return MaterialPageRoute(
+              builder: (_) => const MainShell(),
+            );
+          default:
+            return MaterialPageRoute(
+              builder: (context) => ResponsiveHelper.isWeb(context)
+                  ? const LoginWebScreen()
+                  : const LoginScreen(),
+            );
+        }
       },
     );
   }
 }
 
-// Builder untuk route bernama (/login → /home)
+// ── Slide transition builder ──
 class _SlideTransitionBuilder extends PageTransitionsBuilder {
   const _SlideTransitionBuilder();
 

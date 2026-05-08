@@ -21,6 +21,11 @@ class BilliardTable extends Model
         return $this->hasMany(TableSession::class, 'id_billiards');
     }
 
+    public function reservations()
+    {
+        return $this->hasMany(\App\Models\Reservation::class, 'id_billiards');
+    }
+
     public function user()
     {
         return $this->belongsTo(\App\Models\User::class, 'created_by');

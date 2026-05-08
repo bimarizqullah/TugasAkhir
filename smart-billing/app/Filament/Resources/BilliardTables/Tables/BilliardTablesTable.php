@@ -4,10 +4,16 @@ namespace App\Filament\Resources\BilliardTables\Tables;
 
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select;
-use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Actions\Action;
+use Filament\Actions\EditAction;
+use Filament\Notifications\Notification;
+use App\Models\BilliardTable;
+use App\Models\Reservation;
+use App\Models\Package;
+use App\Models\TableSession;
+use Carbon\Carbon;
 
 class BilliardTablesTable
 {
@@ -18,226 +24,154 @@ class BilliardTablesTable
             ->columns([
                 TextColumn::make('name')
                     ->label('Meja')
-                    ->searchable()
                     ->formatStateUsing(function ($state, $record) {
-                        $isActive = $record->sessions()
-                            ->where('session_status', 'aktif')
-                            ->exists();
+                        $isActive = $record->sessions()->where('session_status', 'aktif')->exists();
+                        return $isActive 
+                            ? '<span style="display:flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; background:#22c55e; border-radius:50%; display:inline-block;"></span>' . $state . '</span>' 
+                            : $state;
+                    })->html(),
 
-                        if ($isActive) {
-                            return '<span style="display:flex; align-items:center; gap:6px;">
-                                        <span style="width:8px; height:8px; background:#22c55e; border-radius:50%; display:inline-block;"></span>
-                                        ' . $state . '
-                                    </span>';
-                        }
-                        return $state;
-                    })
-                    ->html(),
-
-                TextColumn::make('size')->numeric()->sortable(),
-
-                TextColumn::make('status')
-                    ->visible(fn () => auth()->user()->user_role === 'superadmin')
-                    ->color(fn (string $state): string => match ($state) {
-                        'aktif' => 'success',   
-                        'nonaktif' => 'danger',
-                    })
-                    ->badge(),
-
-                TextColumn::make('sessions.session_status')
-                    ->label('Status Meja')
-                    ->visible(fn () => auth()->user()->user_role === 'admin')
+                TextColumn::make('antrian')
+                    ->label('Antrian (Lunas)')
                     ->badge()
-                    ->color(function ($state) {
-                        if ($state === 'Sedang Digunakan') return 'success';
-                        if ($state === 'Tersedia') return 'warning';
-                        if ($state === 'Nonaktif') return 'danger'; // 🔥 Tambah ini
-                        return 'danger';
-                    })
-                    ->getStateUsing(function ($record) {
-                        if ($record->status === 'nonaktif') return 'Nonaktif';
-                        $active = $record->sessions()
-                            ->where('session_status', 'aktif')
-                            ->latest()->first();
-                        return $active ? 'Sedang Digunakan' : 'Tersedia';
+                    ->color(fn (int $state): string => $state > 0 ? 'warning' : 'gray')
+                    ->getStateUsing(function (BilliardTable $record) {
+                        // ANTRIAN HANYA MUNCUL JIKA STATUS MASIH 'berhasil' (Lunas tapi belum main)
+                        return Reservation::where('id_billiards', $record->id)
+                            ->where('payment_status', 'settlement')
+                            ->where('reservation_status', 'berhasil') 
+                            ->count();
                     }),
 
                 TextColumn::make('waktu_berjalan')
-                    ->label('Waktu')
-                    ->visible(fn () => auth()->user()->user_role === 'admin')
-                    ->color(function ($state) {
-                        if ($state === '-') return 'gray';
-                        if ($state === '00:00:00') return 'danger';
-                        return 'success';
-                    })
+                    ->label('Sisa/Durasi')
                     ->getStateUsing(function ($record) {
-                        $session = $record->sessions()
-                            ->where('session_status', 'aktif')
-                            ->latest()->first();
-
+                        $session = $record->sessions()->where('session_status', 'aktif')->latest()->first();
                         if (!$session) return '-';
-
-                        if ($session->session_mode === 'manual') {
-                            $elapsed = now()->diffInSeconds($session->start_time);
-                            return gmdate('H:i:s', $elapsed);
-                        }
-
-                        if (!$session->end_time) return '-';
-
-                        $remaining = now()->diffInSeconds($session->end_time, false);
-                        if ($remaining <= 0) {
-                            $session->update(['session_status' => 'selesai']);
-                            return '00:00:00';
-                        }
-                        return gmdate('H:i:s', $remaining);
+                        $now = Carbon::now();
+                        if ($session->session_mode === 'paket' && $session->end_time) {
+                            $end = Carbon::parse($session->end_time);
+                            return $now->greaterThanOrEqualTo($end) ? 'Waktu Habis' : $now->diff($end)->format('%H:%I:%S');
+                        } 
+                        return Carbon::parse($session->start_time)->diff($now)->format('%H:%I:%S');
                     }),
 
                 TextColumn::make('harga_berjalan')
                     ->label('Harga')
-                    ->visible(fn () => auth()->user()->user_role === 'admin')
-                    ->color(fn ($state) => $state === '' ? 'gray' : 'warning')
+                    ->money('IDR')
                     ->getStateUsing(function ($record) {
-                        $session = $record->sessions()
-                            ->where('session_status', 'aktif')
-                            ->latest()->first();
-
-                        if (!$session) return '-';
-
+                        $session = $record->sessions()->where('session_status', 'aktif')->latest()->first();
+                        if (!$session) return 0;
                         if ($session->session_mode === 'manual') {
-                            $elapsed = now()->diffInSeconds($session->start_time);
-                            $harga   = (int) abs(7000 / 3600 * $elapsed);
-                            return 'Rp ' . number_format($harga, 0, ',', '.');
+                            $detik = Carbon::parse($session->start_time)->diffInSeconds(now());
+                            return (int) round((7000 / 3600) * $detik);
                         }
-
-                        $harga = optional($session->package)->price ?? 0;
-                        return 'Rp ' . number_format($harga, 0, ',', '.');
+                        return $session->package?->price ?? 0;
                     }),
-            ])
 
-            ->recordActions([
-                EditAction::make()
-                    ->visible(fn () =>
-                        auth()->check() &&
-                        auth()->user()->user_role === 'superadmin'
-                    ),
-
-                Action::make('start')
+                TextColumn::make('sessions.session_status')
+                    ->label('Status Meja')
                     ->badge()
+                    ->color(fn ($state) => $state === 'aktif' ? 'success' : 'warning')
+                    ->getStateUsing(fn ($record) => $record->sessions()->where('session_status', 'aktif')->exists() ? 'aktif' : 'tersedia'),
+            ])
+            ->recordActions([
+                // ==================== ACTION START ====================
+                Action::make('start')
                     ->label('Mulai')
                     ->icon('heroicon-o-play')
                     ->color('success')
-                    ->form([
-                        TextInput::make('customer_name')
-                            ->label('Nama Customer')
-                            ->required(),
+                    ->form(function (BilliardTable $record) {
+                        $reservations = Reservation::where('id_billiards', $record->id)
+                            ->where('payment_status', 'settlement')
+                            ->where('reservation_status', 'berhasil')
+                            ->get();
 
-                        Select::make('session_mode')
-                            ->label('Mode')
-                            ->options([
-                                'paket'  => 'Paket',
-                                'manual' => 'Manual (Open Billing)',
-                            ])
-                            ->reactive()
-                            ->required(),
+                        $options = $reservations->mapWithKeys(fn($res) => [
+                            $res->id => "{$res->customer_name} (Jam " . substr($res->start_time, 0, 5) . ")"
+                        ])->toArray();
 
-                        Select::make('id_packages')
-                            ->label('Paket')
-                            ->options(\App\Models\Package::pluck('package_name', 'id'))
-                            ->searchable()
-                            ->preload()
-                            ->visible(fn ($get) => $get('session_mode') === 'paket')
-                            ->required(fn ($get) => $get('session_mode') === 'paket'),
-                    ])
-                    ->action(function ($record, $data) {
-                        if ($data['session_mode'] === 'paket' && empty($data['id_packages'])) {
-                            throw new \Exception('Pilih paket terlebih dahulu');
+                        return [
+                            Select::make('id_reservations')
+                                ->label('Pilih dari Antrian (Lunas)')
+                                ->options($options)
+                                ->placeholder('Pilih antrian...')
+                                ->searchable()->live()
+                                ->afterStateUpdated(function ($state, callable $set) {
+                                    if ($state && $res = Reservation::find($state)) {
+                                        $set('customer_name', $res->customer_name);
+                                        $set('id_packages', $res->id_packages);
+                                        $set('session_mode', $res->id_packages ? 'paket' : 'manual');
+                                    }
+                                }),
+                            TextInput::make('customer_name')->label('Nama Customer')->required(),
+                            Select::make('session_mode')
+                                ->label('Mode Billing')
+                                ->options(['paket' => 'Paket', 'manual' => 'Manual'])
+                                ->default('paket')->live()->required(),
+                            Select::make('id_packages')
+                                ->label('Pilih Paket')
+                                ->options(Package::pluck('package_name', 'id'))
+                                ->visible(fn ($get) => $get('session_mode') === 'paket')
+                                ->required(fn ($get) => $get('session_mode') === 'paket'),
+                        ];
+                    })
+                    ->action(function ($record, array $data) {
+                        $endTime = null;
+                        if ($data['session_mode'] === 'paket' && !empty($data['id_packages'])) {
+                            $pkg = Package::find($data['id_packages']);
+                            $endTime = now()->addMinutes($pkg->time);
                         }
 
-                        $endTime  = null;
-                        $duration = null;
-
-                        if ($data['session_mode'] === 'paket') {
-                            $package  = \App\Models\Package::find($data['id_packages']);
-                            $endTime  = now()->addMinutes($package->time);
-                            $duration = $package->time;
-                        }
-
-                        \App\Models\TableSession::create([
-                            'id_billiards'     => $record->id,
-                            'id_packages'      => $data['id_packages'] ?? null,
-                            'customer_name'    => $data['customer_name'],
-                            'start_time'       => now(),
-                            'end_time'         => $endTime,
-                            'duration_minutes' => $duration,
-                            'session_mode'     => $data['session_mode'],
-                            'session_status'   => \App\Models\TableSession::STATUS_ACTIVE,
+                        TableSession::create([
+                            'id_billiards' => $record->id,
+                            'id_packages' => $data['id_packages'] ?? null,
+                            'id_reservations' => $data['id_reservations'] ?? null,
+                            'customer_name' => $data['customer_name'],
+                            'start_time' => now(),
+                            'end_time' => $endTime,
+                            'session_mode' => $data['session_mode'],
+                            'session_status' => 'aktif',
                         ]);
 
-                        // 🔥 BROADCAST REALTIME
-                        $record->refresh();
-                        broadcast(new \App\Events\TableStatusUpdated($record));
+                        // 🔥 FIX: BEGITU MULAI, UBAH STATUS RESERVASI AGAR ANTRIAN JADI 0
+                        if (!empty($data['id_reservations'])) {
+                            // Kita ubah ke status yang tidak masuk filter antrian (misal: 'pending')
+                            // agar data tetap ada di DB tapi tidak muncul di list antrian lagi.
+                            Reservation::where('id', $data['id_reservations'])->update(['reservation_status' => 'pending']);
+                        }
+                        
+                        Notification::make()->title('Sesi dimulai')->success()->send();
                     })
-                    ->visible(fn ($record) =>
-                        auth()->check() &&
-                        auth()->user()->user_role === 'admin' &&
-                        $record->status === 'aktif' &&
-                        !$record->sessions()->where('session_status', 'aktif')->exists()
-                    ),
+                    ->visible(fn ($record) => $record->status === 'aktif' && !$record->sessions()->where('session_status', 'aktif')->exists()),
 
+                // ==================== ACTION STOP ====================
                 Action::make('stop')
-                    ->badge()
-                    ->label('Selesai')
+                    ->label('Stop')
                     ->icon('heroicon-o-stop')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalHeading('Hentikan Sesi?')
-                    ->modalDescription(function ($record) {
-                        $session = $record->sessions()
-                            ->where('session_status', 'aktif')
-                            ->latest()->first();
-
-                        if (!$session) return '';
-
-                        if ($session->session_mode === 'manual') {
-                            $elapsed     = $session->start_time->diffInSeconds(now());
-                            $durasiMenit = round($elapsed / 60, 1);
-                            $harga       = (int) abs(7000 / 3600 * $elapsed);
-                            return "Durasi: {$durasiMenit} menit | Total: Rp " . number_format($harga, 0, ',', '.');
-                        }
-
-                        $harga = optional(
-                            $record->sessions()
-                                ->where('session_status', 'aktif')
-                                ->latest()->first()?->package
-                        )->price ?? 0;
-
-                        return 'Sesi paket akan dihentikan. Total: Rp ' . number_format($harga, 0, ',', '.');
-                    })
                     ->action(function ($record) {
-                        $session = $record->sessions()
-                            ->where('session_status', 'aktif')
-                            ->latest()->first();
+                        $session = $record->sessions()->where('session_status', 'aktif')->latest()->first();
+                        if ($session) {
+                            $finalPrice = $session->session_mode === 'manual' 
+                                ? (int) round((7000 / 3600) * Carbon::parse($session->start_time)->diffInSeconds(now())) 
+                                : $session->package?->price;
+                            
+                            $session->update([
+                                'session_status' => 'selesai',
+                                'end_time' => now(),
+                                'price' => $finalPrice
+                            ]);
 
-                        if (!$session) return;
-
-                        $endTime      = now();
-                        $durasiAktual = (int) $session->start_time->diffInMinutes($endTime);
-
-                        $session->update([
-                            'end_time'         => $endTime,
-                            'duration_minutes' => $durasiAktual,
-                            'session_status'   => 'selesai',
-                        ]);
-
-                        // 🔥 BROADCAST REALTIME
-                        $record->refresh();
-                        broadcast(new \App\Events\TableStatusUpdated($record));
+                            // Opsional: Tandai reservasi benar-benar gagal/selesai jika ingin
+                            if ($session->id_reservations) {
+                                Reservation::where('id', $session->id_reservations)->update(['reservation_status' => 'gagal']);
+                            }
+                        }
+                        Notification::make()->title('Sesi berakhir')->danger()->send();
                     })
-                    ->visible(fn ($record) =>
-                        auth()->check() &&
-                        auth()->user()->user_role === 'admin' &&
-                        $record->sessions()->where('session_status', 'aktif')->exists()
-                    ),
+                    ->visible(fn ($record) => $record->sessions()->where('session_status', 'aktif')->exists()),
             ]);
     }
 }

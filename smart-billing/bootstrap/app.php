@@ -16,6 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
+        $middleware->validateCsrfTokens(except: [
+            'api/midtrans/webhook', // Pastikan jalur ini sesuai dengan route Anda
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

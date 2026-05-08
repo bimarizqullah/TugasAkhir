@@ -21,6 +21,7 @@ class UserResource extends Resource
     protected static ?string $navigationLabel = 'Pengguna';
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
     protected static string|UnitEnum|null $navigationGroup = 'Kelola Pengguna';
+    protected static ?string $pluralModelLabel = 'Daftar Pengguna';
     public static function form(Schema $schema): Schema
     {
         return UserForm::configure($schema);

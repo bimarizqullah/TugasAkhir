@@ -53,7 +53,6 @@ Route::post('/start-session', function (Request $request) {
         'created_by'       => 1,
     ]);
 
-    // 🔥 Refresh dulu agar session aktif ter-load
     $table->refresh();
     broadcast(new \App\Events\TableStatusUpdated($table));
     Log::info('🔥 BROADCAST SENT', ['table_id' => $table->id]);
@@ -98,9 +97,9 @@ Route::get('/table-status/{id}', function ($id) {
     return response()->json([
         'table_name'        => $table->name,
         'active'            => true,
-        'session_mode'      => $session->session_mode,   // 'manual' atau 'paket'
-        'remaining_seconds' => $remaining,               // untuk countdown paket
-        'elapsed_seconds'   => now()->diffInSeconds($session->start_time), // untuk countup manual
+        'session_mode'      => $session->session_mode,
+        'remaining_seconds' => $remaining,
+        'elapsed_seconds'   => now()->diffInSeconds($session->start_time),
     ]);
 });
 
@@ -119,7 +118,6 @@ Route::post('/stop-session', function (Request $request) {
 
     $session->update(['end_time' => now(), 'session_status' => 'selesai']);
 
-    // 🔥 Broadcast saat stop juga
     $table->refresh();
     broadcast(new \App\Events\TableStatusUpdated($table));
 
@@ -177,6 +175,50 @@ Route::get('/tables', function () {
             ] : null,
         ];
     })]);
+});
+
+Route::get('/tables/{id}/queue', function ($id) {
+    $table = \App\Models\BilliardTable::find($id);
+    if (!$table) {
+        return response()->json(['message' => 'Meja tidak ditemukan'], 404);
+    }
+
+    $queue = \App\Models\Reservation::with(['package'])
+        ->where('id_billiards', $id)
+        ->whereNotIn('reservation_status', ['gagal'])
+        ->orderBy('reservation_date', 'asc')
+        ->orderBy('start_time', 'asc')
+        ->get()
+        ->map(fn ($r) => [
+            'id'                 => $r->id,
+            'queue_number'       => null,
+            'customer_name'      => $r->customer_name,
+            'customer_phone'     => $r->customer_phone,
+            'reservation_date'   => $r->reservation_date?->format('Y-m-d'),
+            // 🔥 Handle null start_time/end_time dengan aman
+            'start_time'         => $r->start_time && $r->start_time !== '00:00:00'
+                                        ? substr($r->start_time, 0, 5)
+                                        : null,
+            'end_time'           => $r->end_time && $r->end_time !== '00:00:00'
+                                        ? substr($r->end_time, 0, 5)
+                                        : null,
+            'reservation_status' => $r->reservation_status,
+            'package_name'       => $r->package?->package_name ?? 'Tanpa Paket',
+            'created_at'         => $r->created_at?->toIso8601String(),
+            'id_users'           => $r->id_users,
+        ])
+        ->values()
+        ->map(function ($item, $index) {
+            $item['queue_number'] = $index + 1;
+            return $item;
+        });
+
+    return response()->json([
+        'table_id'   => (int) $id,
+        'table_name' => $table->name,
+        'total'      => $queue->count(),
+        'data'       => $queue,
+    ]);
 });
 
 // ==========================
@@ -280,97 +322,9 @@ Route::middleware('auth:sanctum')->get('/profile', function (Request $request) {
     ]]);
 });
 
-Route::middleware('auth:sanctum')->post('/reservations', function (Request $request) {
-    $request->validate([
-        'id_billiards'     => 'required|exists:tb_billiards,id',
-        'id_packages'      => 'nullable|exists:tb_package,id',
-        'customer_name'    => 'required|string|max:45',
-        'customer_phone'   => 'required|string|max:15',
-        'reservation_date' => 'required|date|after_or_equal:today',
-    ]);
-
-    $reservation = \App\Models\Reservation::create([
-        'id_users'           => $request->user()->id,
-        'id_billiards'       => $request->id_billiards,
-        'id_packages'        => $request->id_packages ?? null,
-        'customer_name'      => $request->customer_name,
-        'customer_phone'     => $request->customer_phone,
-        'reservation_date'   => $request->reservation_date,
-        'reservation_status' => 'pending',
-    ]);
-
-    return response()->json([
-        'message' => 'Reservasi berhasil dibuat',
-        'data'    => $reservation->load(['billiard', 'package']),
-    ], 201);
-});
-
-Route::middleware('auth:sanctum')->get('/reservations', function (Request $request) {
-    $reservations = \App\Models\Reservation::with(['billiard', 'package'])
-        ->where('id_users', $request->user()->id)
-        ->orderBy('reservation_date', 'desc')
-        ->get();
-
-    return response()->json(['data' => $reservations]);
-});
-
-Route::middleware('auth:sanctum')->get('/reservations/{id}', function ($id, Request $request) {
-    $reservation = \App\Models\Reservation::with(['billiard', 'package'])
-        ->where('id', $id)
-        ->where('id_users', $request->user()->id) // ← cegah akses data user lain
-        ->first();
-
-    if (!$reservation) {
-        return response()->json(['message' => 'Reservasi tidak ditemukan'], 404);
-    }
-
-    return response()->json(['data' => $reservation]);
-});
-
-Route::middleware('auth:sanctum')->delete('/reservations/{id}', function ($id) {
-    $reservation = \App\Models\Reservation::find($id);
-
-    if (!$reservation) {
-        return response()->json(['message' => 'Reservasi tidak ditemukan'], 404);
-    }
-
-    if ($reservation->reservation_status === 'berhasil') {
-        return response()->json(['message' => 'Reservasi yang sudah berhasil tidak dapat dibatalkan'], 400);
-    }
-
-    $reservation->delete();
-
-    return response()->json(['message' => 'Reservasi dibatalkan']);
-});
-
-Route::middleware('auth:sanctum')->patch('/reservations/{id}/cancel', function ($id, Request $request) {
-    $reservation = \App\Models\Reservation::where('id', $id)
-        ->where('id_users', $request->user()->id)
-        ->first();
-
-    if (!$reservation) {
-        return response()->json(['message' => 'Reservasi tidak ditemukan'], 404);
-    }
-
-    if (!in_array($reservation->reservation_status, ['pending', 'terkirim'])) {
-        return response()->json([
-            'message' => 'Reservasi dengan status "'.$reservation->reservation_status.'" tidak dapat dibatalkan',
-        ], 422);
-    }
-
-    $reservation->update(['reservation_status' => 'gagal']);
-
-    // 🔥 BROADCAST MANUAL — observer sudah dihapus
-    $reservation->refresh();
-    broadcast(new \App\Events\ReservationUpdated($reservation));
-
-    return response()->json([
-        'message' => 'Reservasi berhasil dibatalkan',
-        'data'    => $reservation->load(['billiard', 'package']),
-    ]);
-});
-
-// Ambil daftar meja + paket untuk form reservasi (tanpa auth — guest bisa lihat)
+// ==========================
+// PACKAGES
+// ==========================
 Route::get('/packages', function () {
     try {
         $packages = \App\Models\Package::all(['id', 'package_name', 'time', 'price']);
@@ -381,20 +335,23 @@ Route::get('/packages', function () {
     }
 });
 
+// ==========================
+// MIDTRANS WEBHOOK
+// ==========================
 Route::post('/midtrans/webhook', [ReservationController::class, 'handleWebhook'])
     ->name('midtrans.webhook');
- 
-// ── Routes yang butuh autentikasi Sanctum ──
+
+// ==========================
+// 🔥 RESERVASI — semua via ReservationController
+//    Route lama (closure) DIHAPUS agar start_time/end_time tersimpan
+// ==========================
 Route::middleware('auth:sanctum')->group(function () {
- 
-    // Reservasi
     Route::prefix('reservations')->group(function () {
-        Route::get('/',              [ReservationController::class, 'index']);
-        Route::post('/',             [ReservationController::class, 'store']);
-        Route::get('/available-slots', [ReservationController::class, 'availableSlots']);
-        Route::patch('/{id}/cancel', [ReservationController::class, 'cancel']);
+        Route::get('/',                  [ReservationController::class, 'index']);
+        Route::post('/',                 [ReservationController::class, 'store']);
+        Route::get('/available-slots',   [ReservationController::class, 'availableSlots']);
+        Route::patch('/{id}/cancel',     [ReservationController::class, 'cancel']);
         Route::post('/{id}/pay',         [ReservationController::class, 'initiatePayment']);
         Route::get('/{id}/pay/status',   [ReservationController::class, 'paymentStatus']);
     });
- 
 });

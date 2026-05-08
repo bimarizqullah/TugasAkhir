@@ -23,6 +23,7 @@ class PackageResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedGift;
     protected static string|UnitEnum|null $navigationGroup = 'Master Data';
     protected static ?string $navigationLabel = 'Paket Meja';
+    protected static ?string $pluralModelLabel = 'Daftar Paket Meja';
     protected static ?string $recordTitleAttribute = 'package_name';
 
     public static function form(Schema $schema): Schema

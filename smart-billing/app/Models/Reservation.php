@@ -17,6 +17,8 @@ class Reservation extends Model
         'customer_phone',
         'reservation_date',
         'reservation_status',
+        'start_time',
+        'end_time',
         // Kolom payment Midtrans (ditambah via migration)
         'payment_order_id',
         'payment_qr_string',

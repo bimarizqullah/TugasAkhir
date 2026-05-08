@@ -22,6 +22,7 @@ class ReservationResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingStorefront;
     protected static string|UnitEnum|null $navigationGroup = 'Master Data';
     protected static ?string $navigationLabel = 'Reservasi';
+    protected static ?string $pluralModelLabel = 'Reservasi';
     protected static ?string $recordTitleAttribute = 'customer_name';
 
     public static function form(Schema $schema): Schema

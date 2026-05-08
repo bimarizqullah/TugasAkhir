@@ -22,7 +22,7 @@ class ReservationService {
   //  Reservasi
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Buat reservasi baru — sekarang wajib menyertakan start_time & end_time
+  /// Buat reservasi baru — wajib menyertakan start_time & end_time
   static Future<Map<String, dynamic>> createReservation({
     required int    idBilliards,
     int?            idPackages,
@@ -53,7 +53,6 @@ class ReservationService {
   }
 
   /// Ambil slot yang sudah terpesan di meja & tanggal tertentu
-  /// untuk ditampilkan sebagai indikator jam tidak tersedia
   static Future<List<dynamic>> getBookedSlots({
     required int    idBilliards,
     required String reservationDate,
@@ -72,6 +71,33 @@ class ReservationService {
       return jsonDecode(response.body)['booked_slots'] ?? [];
     }
     return [];
+  }
+
+  /// 🔥 Fetch antrian reservasi untuk 1 meja (FIFO — sudah diurutkan backend)
+  ///
+  /// Mengembalikan:
+  /// ```json
+  /// {
+  ///   "table_id"   : 1,
+  ///   "table_name" : "Meja 1",
+  ///   "total"      : 3,
+  ///   "data"       : [ { "id": 1, "queue_number": 1, ... } ]
+  /// }
+  /// ```
+  static Future<Map<String, dynamic>> fetchTableQueue(int tableId) async {
+    final token = await Storage.getToken();
+    final headers = <String, String>{'Accept': 'application/json'};
+    if (token != null) headers['Authorization'] = 'Bearer $token';
+
+    final response = await http.get(
+      Uri.parse('${AppConfig.apiUrl}/tables/$tableId/queue'),
+      headers: headers,
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Gagal load antrian [$tableId]: ${response.statusCode}');
   }
 
   static Future<Map<String, dynamic>> cancelReservation(int id) async {
@@ -140,18 +166,6 @@ class ReservationService {
   // ──────────────────────────────────────────────────────────────────────
 
   /// Inisiasi / ambil kembali QRIS untuk reservasi yang sudah dikonfirmasi admin.
-  ///
-  /// Mengembalikan:
-  /// ```json
-  /// {
-  ///   "order_id"   : "RESERVATION-1-...",
-  ///   "qr_string"  : "00020101...",
-  ///   "qr_url"     : "https://...",
-  ///   "expired_at" : "2026-05-01T12:30:00.000000Z",
-  ///   "amount"     : 50000
-  /// }
-  /// ```
-  /// Throws [ReservationNotApprovedYet] jika admin belum approve.
   static Future<Map<String, dynamic>> initiatePayment(int reservationId) async {
     final response = await http.post(
       Uri.parse('${AppConfig.apiUrl}/reservations/$reservationId/pay'),
@@ -165,12 +179,8 @@ class ReservationService {
     final body = jsonDecode(response.body);
     final code = body['code'] ?? '';
 
-    if (code == 'WAITING_APPROVAL') {
-      throw ReservationNotApprovedYet();
-    }
-    if (code == 'ALREADY_PAID') {
-      throw ReservationAlreadyPaid();
-    }
+    if (code == 'WAITING_APPROVAL') throw ReservationNotApprovedYet();
+    if (code == 'ALREADY_PAID')     throw ReservationAlreadyPaid();
 
     throw Exception(body['message'] ?? 'Gagal membuat transaksi QRIS');
   }

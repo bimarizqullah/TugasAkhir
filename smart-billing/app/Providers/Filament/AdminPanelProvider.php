@@ -31,6 +31,9 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
+            ->brandName('Smart Billing System - Billiard Etan Patung')
+            ->brandLogo(asset('images/logo.png')) // Memanggil logo dari folder public
+            ->brandLogoHeight('5rem')
             ->login()
             ->navigationGroups([
                 NavigationGroup::make()->label('User Management'),

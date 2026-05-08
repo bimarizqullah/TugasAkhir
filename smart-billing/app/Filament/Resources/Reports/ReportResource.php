@@ -21,6 +21,7 @@ class ReportResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
     protected static ?string $navigationLabel = 'Transaksi';
+    protected static ?string $pluralModelLabel = 'Transaksi Meja';
     protected static string|UnitEnum|null $navigationGroup = 'Laporan Transaksi';
     protected static ?string $recordTitleAttribute = 'id';
 

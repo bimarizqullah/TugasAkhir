@@ -22,6 +22,7 @@ class BilliardTableResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedSquares2x2;
     protected static string|UnitEnum|null $navigationGroup = 'Master Data';
     protected static ?string $navigationLabel = 'Meja';
+    protected static ?string $pluralModelLabel = 'Meja';
 
 
     public static function form(Schema $schema): Schema

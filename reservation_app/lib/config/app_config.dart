@@ -1,7 +1,11 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class AppConfig {
-  static const String baseUrl = 'http://192.168.1.5:8000';
-  static const String apiUrl = '$baseUrl/api';
-  static const String wsHost = '192.168.1.5';
-  static const int wsPort = 8080;
-  static const String wsAppKey = '0sfxxzybqqynfdnscgmn';
+  // Menggunakan static final karena nilainya diambil saat runtime
+  static final String baseUrl = dotenv.get('BASE_URL', fallback: 'http://127.0.0.1:8000');
+  static final String apiUrl = '$baseUrl/api';
+  
+  static final String wsHost = dotenv.get('WS_HOST', fallback: '127.0.0.1');
+  static final int wsPort = int.parse(dotenv.get('WS_PORT', fallback: '8080'));
+  static final String wsAppKey = dotenv.get('WS_APP_KEY', fallback: '');
 }

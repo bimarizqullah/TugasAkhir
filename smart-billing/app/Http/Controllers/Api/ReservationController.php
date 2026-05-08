@@ -57,25 +57,28 @@ class ReservationController extends Controller
             'start_time'       => 'required|date_format:H:i',
             'end_time'         => 'required|date_format:H:i|after:start_time',
         ]);
-
-        // Cek bentrok reservasi di meja + tanggal + jam yang sama
+    
+        // 🔥 FIX: Cek bentrok — hanya vs reservasi yang punya jam valid
         $conflict = Reservation::where('id_billiards', $validated['id_billiards'])
             ->where('reservation_date', $validated['reservation_date'])
             ->whereNotIn('reservation_status', ['gagal'])
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->where('start_time', '!=', '00:00:00')
+            ->where('end_time',   '!=', '00:00:00')
             ->where(function ($q) use ($validated) {
-                // Overlap: start_time < end_existing AND end_time > start_existing
                 $q->where('start_time', '<', $validated['end_time'])
-                  ->where('end_time',   '>',  $validated['start_time']);
+                ->where('end_time',   '>', $validated['start_time']);
             })
             ->exists();
-
+    
         if ($conflict) {
             return response()->json([
                 'message' => 'Meja sudah dipesan pada jam tersebut. Pilih jam lain.',
                 'code'    => 'TIME_CONFLICT',
             ], 422);
         }
-
+    
         $reservation = Reservation::create([
             'id_users'           => $request->user()->id,
             'id_billiards'       => $validated['id_billiards'],
@@ -87,7 +90,7 @@ class ReservationController extends Controller
             'end_time'           => $validated['end_time'],
             'reservation_status' => 'menunggu_konfirmasi',
         ]);
-
+    
         return response()->json([
             'message'        => 'Reservasi berhasil dibuat. Menunggu konfirmasi admin.',
             'reservation_id' => $reservation->id,
@@ -106,17 +109,22 @@ class ReservationController extends Controller
             'id_billiards'     => 'required|integer|exists:tb_billiards,id',
             'reservation_date' => 'required|date',
         ]);
-
+    
         $booked = Reservation::where('id_billiards', $request->id_billiards)
             ->where('reservation_date', $request->reservation_date)
             ->whereNotIn('reservation_status', ['gagal'])
+            // 🔥 FIX: hanya ambil yang punya start_time & end_time valid
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->where('start_time', '!=', '00:00:00')
+            ->where('end_time',   '!=', '00:00:00')
             ->get(['start_time', 'end_time', 'reservation_status'])
             ->map(fn ($r) => [
                 'start_time' => substr($r->start_time, 0, 5), // HH:MM
                 'end_time'   => substr($r->end_time,   0, 5),
                 'status'     => $r->reservation_status,
             ]);
-
+    
         return response()->json(['booked_slots' => $booked]);
     }
 
