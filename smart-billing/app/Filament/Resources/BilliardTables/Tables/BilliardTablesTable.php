@@ -49,11 +49,36 @@ class BilliardTablesTable
                     ->getStateUsing(function ($record) {
                         $session = $record->sessions()->where('session_status', 'aktif')->latest()->first();
                         if (!$session) return '-';
+
                         $now = Carbon::now();
+
+                        // Auto-stop: khusus mode paket yang end_time sudah lewat
                         if ($session->session_mode === 'paket' && $session->end_time) {
                             $end = Carbon::parse($session->end_time);
-                            return $now->greaterThanOrEqualTo($end) ? 'Waktu Habis' : $now->diff($end)->format('%H:%I:%S');
-                        } 
+
+                            if ($now->greaterThanOrEqualTo($end)) {
+                                // Hentikan sesi otomatis
+                                $session->update([
+                                    'session_status' => 'selesai',
+                                    'price'          => $session->package?->price ?? 0,
+                                ]);
+
+                                // Update reservasi terkait jika ada
+                                if ($session->id_reservations) {
+                                    Reservation::where('id', $session->id_reservations)
+                                        ->update(['reservation_status' => 'selesai']);
+                                }
+
+                                // Broadcast ke Flutter agar tombol Stop langsung berubah jadi Start
+                                event(new TableStatusUpdated($record));
+
+                                return 'Selesai';
+                            }
+
+                            return $now->diff($end)->format('%H:%I:%S');
+                        }
+
+                        // Mode manual: hitung durasi naik
                         return Carbon::parse($session->start_time)->diff($now)->format('%H:%I:%S');
                     }),
 
