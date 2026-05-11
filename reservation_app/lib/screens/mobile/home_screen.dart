@@ -21,7 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _countdownTimer;
   StreamSubscription? _wsSubscription;
   StreamSubscription? _connSubscription;
-  StreamSubscription? _reservationSub; // 🔥 listen reservation updates
+  StreamSubscription? _reservationSub;
 
   // queue count cache: tableId → jumlah antrian
   final Map<int, int> _queueCounts = {};
@@ -38,7 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _startCountdownTimer();
-    _listenToWebsocket();
+    // 🔥 FIX: HAPUS _listenToWebsocket() — subscription diurus di _bootstrap()
     _bootstrap();
   }
 
@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadTablesWithSession();
     await WebSocketService.connect();
 
+    // 🔥 FIX: Satu subscription saja — tidak ada duplikat
     _wsSubscription = WebSocketService.onTableEvent.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -74,32 +75,13 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    // 🔥 Setiap ada perubahan reservasi → refresh queue count semua meja
     _reservationSub = WebSocketService.onReservationEvent.listen((event) {
       if (!mounted) return;
       _refreshAllQueueCounts();
     });
   }
 
-    void _listenToWebsocket() {
-    _wsSubscription?.cancel();
-    _wsSubscription = WebSocketService.onTableEvent.listen((event) {
-      if (event.type == 'updated') {
-        if (mounted) {
-          setState(() {
-            final index = _tables.indexWhere((t) => t['id'] == event.data['id']);
-            if (index != -1) {
-              _tables[index] = event.data;
-            }
-          });
-        }
-      }
-    });
-
-    _connSubscription = WebSocketService.onConnectionChange.listen((connected) {
-      if (mounted) setState(() {});
-    });
-  }
+  // 🔥 FIX: _listenToWebsocket() DIHAPUS — sudah digabung ke _bootstrap() di atas
 
   void _startCountdownTimer() {
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -165,13 +147,23 @@ class _HomeScreenState extends State<HomeScreen> {
         (t) => t['id']?.toString() == newTable['id']?.toString());
     if (idx != -1) {
       final old = WebSocketService.safeCastMap(_tables[idx]);
+      final newSession = Map<String, dynamic>.from(newTable['session'] ?? {});
+
+      // 🔥 FIX: Jika session_status berubah (aktif ↔ tersedia), GANTI session sepenuhnya.
+      // Jangan merge dengan session lama agar start_time/end_time yang obsolete tidak bertahan.
+      final oldSessionStatus = old['session_status']?.toString() ?? '';
+      final newSessionStatus = newTable['session_status']?.toString() ?? '';
+      final sessionChanged   = oldSessionStatus != newSessionStatus;
+
       _tables[idx] = {
         ...old,
         ...newTable,
-        'session': {
-          ...Map<String, dynamic>.from(old['session'] ?? {}),
-          ...Map<String, dynamic>.from(newTable['session'] ?? {}),
-        },
+        'session': sessionChanged
+            ? newSession  // Ganti total jika status berubah
+            : {
+                ...Map<String, dynamic>.from(old['session'] ?? {}),
+                ...newSession,  // Merge jika status sama
+              },
       };
     } else {
       _handleTableAdd(newTable);

@@ -67,21 +67,52 @@ class WebSocketService {
     }
   }
 
-  // Di dalam websocket_service.dart
   static void _handleMessage(dynamic message) {
-    final data = jsonDecode(message.toString());
-    final event = data['event'];
-    final payload = data['data'] is String ? jsonDecode(data['data']) : data['data'];
+    final raw = message.toString();
+    // 🔥 DEBUG: uncomment baris ini saat troubleshoot untuk lihat event apa yang masuk
+    // print('📨 RAW WS: $raw');
 
-    // 🔥 PERBAIKAN: Sesuaikan dengan broadcastAs di Laravel
+    Map<String, dynamic> data;
+    try {
+      data = jsonDecode(raw);
+    } catch (e) {
+      print('❌ Failed to parse WS message: $e');
+      return;
+    }
+
+    final event = data['event']?.toString() ?? '';
+
+    // Data bisa berupa String (Pusher protocol) atau Map langsung
+    dynamic rawPayload = data['data'];
+    Map<String, dynamic> payload = {};
+    if (rawPayload is String && rawPayload.isNotEmpty) {
+      try {
+        payload = Map<String, dynamic>.from(jsonDecode(rawPayload));
+      } catch (_) {
+        payload = {};
+      }
+    } else if (rawPayload is Map) {
+      payload = Map<String, dynamic>.from(rawPayload);
+    }
+
+    // 🔥 FIX: Reverb/Pusher bisa mengirim event dengan atau tanpa titik di depan.
+    // broadcastAs() = 'table.updated' → Reverb kirim sebagai '.table.updated' atau 'table.updated'
+    // Normalize: strip leading dot untuk perbandingan
+    final normalizedEvent = event.startsWith('.') ? event.substring(1) : event;
+
     if (event == 'pusher:connection_established') {
       print('✅ WS Connected');
       _setConnected(true);
-    } else if (event == 'table.updated') { // ← Harus sama dengan broadcastAs di Laravel
-      print('📥 Table Update Received: ${payload['id']}');
+    } else if (normalizedEvent == 'table.updated') {
+      print('📥 Table Update Received — id: ${payload['id']}, status: ${payload['session_status']}');
       _tableController.add(TableEvent(type: 'updated', data: payload));
-    } else if (event == 'App\\Events\\ReservationCreated') {
+    } else if (normalizedEvent == 'App\\Events\\ReservationCreated' ||
+               normalizedEvent == 'reservation.created') {
       _reservationController.add(payload);
+    } else if (event == 'pusher:pong') {
+      // Ignore pong silently
+    } else {
+      print('ℹ️ Unhandled WS event: "$event"');
     }
   }
 
