@@ -163,16 +163,20 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
+                    color: Colors.white.withOpacity(1),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Icon(Icons.sports_bar_rounded,
-                      size: 48, color: Colors.white),
+                  child: Image.asset(
+                    'assets/images/brand.png', // Sesuaikan nama file
+                    width: 130,  // Atur ukuran sesuai keinginan
+                    height: 130,
+                    fit: BoxFit.contain,
+                  ),
                 ),
                 const SizedBox(height: 36),
 
                 const Text(
-                  'Etan Patung\nBooking System',
+                  'Etan Patung\nReservasi Meja Billiard',
                   style: TextStyle(
                     color     : Colors.white,
                     fontSize  : 38,
@@ -182,7 +186,7 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Sistem reservasi meja billiard\nmodern, mudah, dan real-time.',
+                  'Sistem reservasi meja billiard\nmudah, dan cepat',
                   style: TextStyle(
                     color : Colors.white.withOpacity(0.75),
                     fontSize: 16,
@@ -195,8 +199,8 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
                 ...[
                   (Icons.bolt_outlined,       'Informasi meja secara real-time'),
                   (Icons.event_available,     'Reservasi mudah & cepat'),
-                  (Icons.queue_play_next,     'Sistem antrian otomatis'),
-                  (Icons.security_outlined,   'Login aman dengan Google'),
+                  (Icons.queue_play_next,     'Sistem antrian terorganisir'),
+                  (Icons.security_outlined,   'Pembayaran aman & terintegrasi'),
                 ].map((e) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: Row(children: [
@@ -250,7 +254,7 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
           const SizedBox(height: 8),
           _buildTextField(
             controller  : _emailCtrl,
-            hint        : 'contoh@email.com',
+            hint        : 'Masukkan email Anda',
             icon        : Icons.email_outlined,
             keyboardType: TextInputType.emailAddress,
             validator   : (v) {
@@ -318,7 +322,7 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
             const Expanded(child: Divider(color: _borderColor)),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Text('atau masuk dengan',
+              child: Text('atau',
                   style: TextStyle(color: _textGrey, fontSize: 12)),
             ),
             const Expanded(child: Divider(color: _borderColor)),
@@ -341,11 +345,14 @@ class _LoginWebScreenState extends State<LoginWebScreen> {
                       width: 20, height: 20,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: _textGrey))
-                  : const Row(
+                  :  Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.g_mobiledata_rounded,
-                            size: 26, color: Color(0xFF4285F4)),
+                        Image.asset(
+                          'assets/images/google.png', 
+                          width: 22, 
+                          height: 22,
+                        ),
                         SizedBox(width: 10),
                         Text('Masuk dengan Google',
                             style: TextStyle(

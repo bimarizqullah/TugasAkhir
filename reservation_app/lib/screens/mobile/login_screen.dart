@@ -264,11 +264,15 @@ class _LoginScreenState extends State<LoginScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withOpacity(1),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.sports_bar_rounded,
-                  size: 44, color: Colors.white),
+              child: Image.asset(
+                'assets/images/brand.png', // Sesuaikan nama file
+                width: 90,  // Atur ukuran sesuai keinginan
+                height: 90,
+                fit: BoxFit.contain,
+              ),
             ),
             const SizedBox(height: 14),
             const Text('Etan Patung Booking',
@@ -377,9 +381,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: _textGrey))
             : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Container(
-                  width: 22, height: 22,
-                  child: CustomPaint(painter: _GoogleLogoPainter()),
+                Image.asset(
+                  'assets/images/google.png', 
+                  width: 22, 
+                  height: 22,
                 ),
                 const SizedBox(width: 10),
                 const Text('Masuk dengan Google',

@@ -17,7 +17,6 @@ Future<void> main() async {
   // 4. Load file .env dari root project
   try {
     await dotenv.load(fileName: ".env");
-    print('>>> GOOGLE CLIENT ID: ${AppConfig.googleWebClientId}');
   } catch (e) {
     // Opsional: print error jika file .env lupa ditaruh atau belum didaftarkan di pubspec
     debugPrint("Error loading .env file: $e");
