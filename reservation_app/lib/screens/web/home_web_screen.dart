@@ -23,6 +23,7 @@ class _HomeWebScreenState extends State<HomeWebScreen> {
   StreamSubscription? _wsSubscription;
   StreamSubscription? _connSubscription;
   StreamSubscription? _reservationSub;
+  final Set<int> _autoStoppedTables = {}; // Track tables that have been auto-stopped
 
   final Map<int, int> _queueCounts = {};
 
@@ -39,6 +40,7 @@ class _HomeWebScreenState extends State<HomeWebScreen> {
   void initState() {
     super.initState();
     _startCountdownTimer();
+    _listenToWebsocket();
     _bootstrap();
   }
 
@@ -128,6 +130,33 @@ class _HomeWebScreenState extends State<HomeWebScreen> {
       if (!mounted) return;
       setState(() => _queueCounts[tableId] = count);
     } catch (_) {}
+  }
+
+  void _listenToWebsocket() {
+    // Batalkan subscription lama jika ada
+    _wsSubscription?.cancel();
+
+    _wsSubscription = WebSocketService.onTableEvent.listen((event) {
+      if (event.type == 'updated') {
+        if (mounted) {
+          setState(() {
+            // Cari index meja yang ID-nya sama dengan kiriman WebSocket
+            final index = _tables.indexWhere((t) => t['id'] == event.data['id']);
+            
+            if (index != -1) {
+              // Update data meja tersebut secara instan
+              _tables[index] = event.data;
+              print('🔄 Meja ${event.data['name']} Updated Real-time');
+            }
+          });
+        }
+      }
+    });
+
+    // Listen perubahan status koneksi (untuk indikator 🔥 Live)
+    _connSubscription = WebSocketService.onConnectionChange.listen((connected) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _handleTableUpdate(Map<String, dynamic> newTable) {

@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _startCountdownTimer();
+    _listenToWebsocket();
     _bootstrap();
   }
 
@@ -77,6 +78,26 @@ class _HomeScreenState extends State<HomeScreen> {
     _reservationSub = WebSocketService.onReservationEvent.listen((event) {
       if (!mounted) return;
       _refreshAllQueueCounts();
+    });
+  }
+
+    void _listenToWebsocket() {
+    _wsSubscription?.cancel();
+    _wsSubscription = WebSocketService.onTableEvent.listen((event) {
+      if (event.type == 'updated') {
+        if (mounted) {
+          setState(() {
+            final index = _tables.indexWhere((t) => t['id'] == event.data['id']);
+            if (index != -1) {
+              _tables[index] = event.data;
+            }
+          });
+        }
+      }
+    });
+
+    _connSubscription = WebSocketService.onConnectionChange.listen((connected) {
+      if (mounted) setState(() {});
     });
   }
 

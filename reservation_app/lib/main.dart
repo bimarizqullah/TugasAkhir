@@ -7,6 +7,7 @@ import 'screens/mobile/login_screen.dart';
 import 'screens/web/login_web_screen.dart';
 import 'services/websocket_service.dart';
 import 'utils/page_transitions.dart';
+import 'config/app_config.dart'; // 🔥 IMPORT
 
 // 2. Ubah main menjadi Future dan async
 Future<void> main() async {
@@ -16,6 +17,7 @@ Future<void> main() async {
   // 4. Load file .env dari root project
   try {
     await dotenv.load(fileName: ".env");
+    print('>>> GOOGLE CLIENT ID: ${AppConfig.googleWebClientId}');
   } catch (e) {
     // Opsional: print error jika file .env lupa ditaruh atau belum didaftarkan di pubspec
     debugPrint("Error loading .env file: $e");

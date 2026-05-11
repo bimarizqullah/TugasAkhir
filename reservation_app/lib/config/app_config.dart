@@ -8,4 +8,9 @@ class AppConfig {
   static final String wsHost = dotenv.get('WS_HOST', fallback: '127.0.0.1');
   static final int wsPort = int.parse(dotenv.get('WS_PORT', fallback: '8080'));
   static final String wsAppKey = dotenv.get('WS_APP_KEY', fallback: '');
+
+  static final String googleWebClientId = dotenv.get(
+    'GOOGLE_WEB_CLIENT_ID',
+    fallback: '',
+  );
 }

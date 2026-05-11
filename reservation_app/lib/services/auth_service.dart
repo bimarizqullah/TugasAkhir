@@ -3,9 +3,13 @@ import 'package:http/http.dart' as http;
 import 'package:google_sign_in/google_sign_in.dart';
 import '../utils/storage.dart';
 import '../config/app_config.dart'; // 🔥 IMPORT
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AuthService {
-  static final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+  static final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: kIsWeb ? AppConfig.googleWebClientId : null,
+    scopes: ['email', 'profile'],
+  );
 
   // ─── REGISTER ──────────────────────────────────────
   static Future<Map<String, dynamic>> register({

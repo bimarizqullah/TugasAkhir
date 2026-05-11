@@ -14,6 +14,7 @@ use App\Models\Reservation;
 use App\Models\Package;
 use App\Models\TableSession;
 use Carbon\Carbon;
+use App\Events\TableStatusUpdated;
 
 class BilliardTablesTable
 {
@@ -117,32 +118,32 @@ class BilliardTablesTable
                         ];
                     })
                     ->action(function ($record, array $data) {
-                        $endTime = null;
-                        if ($data['session_mode'] === 'paket' && !empty($data['id_packages'])) {
-                            $pkg = Package::find($data['id_packages']);
-                            $endTime = now()->addMinutes($pkg->time);
-                        }
+                    $endTime = null;
+                    if ($data['session_mode'] === 'paket' && !empty($data['id_packages'])) {
+                        $pkg = Package::find($data['id_packages']);
+                        $endTime = now()->addMinutes($pkg->time);
+                    }
 
-                        TableSession::create([
-                            'id_billiards' => $record->id,
-                            'id_packages' => $data['id_packages'] ?? null,
-                            'id_reservations' => $data['id_reservations'] ?? null,
-                            'customer_name' => $data['customer_name'],
-                            'start_time' => now(),
-                            'end_time' => $endTime,
-                            'session_mode' => $data['session_mode'],
-                            'session_status' => 'aktif',
-                        ]);
+                    $session = TableSession::create([
+                        'id_billiards' => $record->id,
+                        'id_packages' => $data['id_packages'] ?? null,
+                        'id_reservations' => $data['id_reservations'] ?? null,
+                        'customer_name' => $data['customer_name'],
+                        'start_time' => now(),
+                        'end_time' => $endTime,
+                        'session_mode' => $data['session_mode'],
+                        'session_status' => 'aktif',
+                    ]);
 
-                        // 🔥 FIX: BEGITU MULAI, UBAH STATUS RESERVASI AGAR ANTRIAN JADI 0
-                        if (!empty($data['id_reservations'])) {
-                            // Kita ubah ke status yang tidak masuk filter antrian (misal: 'pending')
-                            // agar data tetap ada di DB tapi tidak muncul di list antrian lagi.
-                            Reservation::where('id', $data['id_reservations'])->update(['reservation_status' => 'pending']);
-                        }
-                        
-                        Notification::make()->title('Sesi dimulai')->success()->send();
-                    })
+                    if (!empty($data['id_reservations'])) {
+                        Reservation::where('id', $data['id_reservations'])->update(['reservation_status' => 'pending']);
+                    }
+                    
+                    // 🔥 TAMBAHKAN INI: Trigger broadcast ke Flutter
+                    event(new TableStatusUpdated($record));
+
+                    Notification::make()->title('Sesi dimulai')->success()->send();
+                })
                     ->visible(fn ($record) => $record->status === 'aktif' && !$record->sessions()->where('session_status', 'aktif')->exists()),
 
                 // ==================== ACTION STOP ====================
@@ -168,6 +169,8 @@ class BilliardTablesTable
                             if ($session->id_reservations) {
                                 Reservation::where('id', $session->id_reservations)->update(['reservation_status' => 'gagal']);
                             }
+
+                            event(new TableStatusUpdated($record));
                         }
                         Notification::make()->title('Sesi berakhir')->danger()->send();
                     })
