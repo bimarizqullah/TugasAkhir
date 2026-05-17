@@ -1,26 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // 1. Import package dotenv
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:reservation_app/widgets/main_shell.dart';
 import 'utils/responsive_helper.dart';
 import 'screens/mobile/login_screen.dart';
 import 'screens/web/login_web_screen.dart';
 import 'services/websocket_service.dart';
 import 'utils/page_transitions.dart';
-import 'config/app_config.dart'; // 🔥 IMPORT
+import 'config/app_config.dart';
+import 'utils/storage.dart'; // 🔥 IMPORT
 
-// 2. Ubah main menjadi Future dan async
 Future<void> main() async {
-  // 3. Pastikan inisialisasi binding dilakukan di awal
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 4. Load file .env dari root project
+  // Load .env
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
-    // Opsional: print error jika file .env lupa ditaruh atau belum didaftarkan di pubspec
     debugPrint("Error loading .env file: $e");
   }
+
+  // 🔥 Init storage cache SEBELUM runApp — agar hasSession() sinkron tersedia
+  await Storage.init();
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -28,7 +29,7 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
-  
+
   runApp(const MyApp());
 }
 
@@ -75,7 +76,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           },
         ),
       ),
-      initialRoute: '/login',
+      // 🔥 FIX: AuthGate cek token dulu — tidak langsung ke /login
+      // Storage.init() sudah dipanggil di main() sehingga hasSession() sinkron
+      home: const _AuthGate(),
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case '/login':
@@ -97,6 +100,23 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         }
       },
     );
+  }
+}
+
+// ── Auth Gate — cek token, arahkan ke home atau login ──────────────
+// Dipanggil saat startup & refresh. Storage.init() sudah memuat token
+// ke cache, sehingga hasSession() langsung tersedia tanpa async.
+class _AuthGate extends StatelessWidget {
+  const _AuthGate();
+
+  @override
+  Widget build(BuildContext context) {
+    if (Storage.hasSession()) {
+      return const MainShell();
+    }
+    return ResponsiveHelper.isWeb(context)
+        ? const LoginWebScreen()
+        : const LoginScreen();
   }
 }
 

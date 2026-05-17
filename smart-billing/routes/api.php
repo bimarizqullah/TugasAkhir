@@ -350,6 +350,41 @@ Route::middleware('auth:sanctum')->get('/profile', function (Request $request) {
     ]]);
 });
 
+Route::middleware('auth:sanctum')->put('/profile', function (Request $request) {
+    $user = $request->user();
+
+    $request->validate([
+        'name'                  => 'sometimes|string|max:45',
+        'email'                 => 'sometimes|email|max:35|unique:users,email,' . $user->id,
+        'password'              => 'sometimes|string|min:8|confirmed',
+        'current_password'      => 'required_with:password|string',
+    ]);
+
+    // Verifikasi password lama jika ingin ganti password
+    if ($request->filled('password')) {
+        if (!Hash::check($request->current_password, $user->password)) {
+            return response()->json(['message' => 'Password lama tidak sesuai'], 422);
+        }
+        $user->password = bcrypt($request->password);
+    }
+
+    if ($request->filled('name'))  $user->name  = $request->name;
+    if ($request->filled('email')) $user->email = $request->email;
+
+    $user->save();
+
+    return response()->json([
+        'message' => 'Profil berhasil diperbarui',
+        'user'    => [
+            'id'    => $user->id,
+            'name'  => $user->name,
+            'email' => $user->email,
+            'role'  => $user->user_role,
+            'photo' => $user->getFilamentAvatarUrl(),
+        ],
+    ]);
+});
+
 // ==========================
 // PACKAGES
 // ==========================

@@ -109,7 +109,7 @@ class AuthService {
     await Storage.clear();
   }
 
-    // Ambil profile dari API
+  // Ambil profile dari API
   static Future<Map<String, dynamic>?> getProfile() async {
     final token = await Storage.getToken();
     if (token == null) return null;
@@ -124,10 +124,48 @@ class AuthService {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      // Simpan user terbaru ke storage
       await Storage.saveUser(jsonEncode(data['user']));
       return data['user'];
     }
     return null;
   }
-}
+
+  // ─── UPDATE PROFILE ────────────────────────────────
+  static Future<Map<String, dynamic>> updateProfile({
+    String? name,
+    String? email,
+    String? currentPassword,
+    String? newPassword,
+    String? newPasswordConfirmation,
+  }) async {
+    final token = await Storage.getToken();
+    if (token == null) {
+      return {'status': 401, 'data': {'message': 'Tidak terautentikasi'}};
+    }
+
+    final body = <String, dynamic>{};
+    if (name  != null && name.isNotEmpty)  body['name']  = name;
+    if (email != null && email.isNotEmpty) body['email'] = email;
+    if (newPassword != null && newPassword.isNotEmpty) {
+      body['current_password']      = currentPassword ?? '';
+      body['password']              = newPassword;
+      body['password_confirmation'] = newPasswordConfirmation ?? '';
+    }
+
+    final response = await http.put(
+      Uri.parse('${AppConfig.apiUrl}/profile'),
+      headers: {
+        'Content-Type'  : 'application/json',
+        'Accept'        : 'application/json',
+        'Authorization' : 'Bearer $token',
+      },
+      body: jsonEncode(body),
+    );
+
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200) {
+      // Update cache lokal
+      await Storage.saveUser(jsonEncode(data['user']));
+    }
+    return {'status': response.statusCode, 'data': data};
+  }}

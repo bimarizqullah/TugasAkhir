@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../utils/storage.dart';
+import '../shared/edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool showBackButton;
@@ -282,16 +283,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           subtitle: role,
         ),
         _buildMenuItem(
-          icon: Icons.history,
-          title: 'Riwayat Sesi',
-          subtitle: 'Lihat sesi sebelumnya',
-          onTap: () {}, // TODO: navigasi ke riwayat
-        ),
-        _buildMenuItem(
-          icon: Icons.settings_outlined,
-          title: 'Pengaturan',
-          subtitle: 'Kelola akun',
-          onTap: () {}, // TODO: navigasi ke pengaturan
+          icon: Icons.edit_outlined,
+          title: 'Edit Profil',
+          subtitle: 'Ubah nama, email, atau password',
+          onTap: () async {
+            final updated = await Navigator.push<Map<String, dynamic>>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => EditProfileScreen(user: _user ?? {}),
+              ),
+            );
+            if (updated != null && mounted) {
+              setState(() => _user = updated);
+            }
+          },
         ),
 
         const SizedBox(height: 24),

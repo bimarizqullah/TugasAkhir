@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../utils/storage.dart';
+import '../shared/edit_profile_screen.dart';
 
 class ProfileWebScreen extends StatefulWidget {
   const ProfileWebScreen({super.key});
@@ -20,6 +21,7 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
   static const Color _textGrey = Color(0xFF64748B);
   static const Color _bgColor  = Color(0xFFF8FAFC);
   static const Color _danger   = Color(0xFFDC2626);
+  static const Color _success  = Color(0xFF16A34A);
 
   @override
   void initState() {
@@ -65,8 +67,7 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Keluar',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Keluar', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -77,6 +78,31 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
       }
     }
+  }
+
+  void _openEditProfile() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.3),
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: EditProfileScreen(user: _user ?? {}, isDialog: true),
+      ),
+    ).then((updatedUser) {
+      if (updatedUser != null && mounted) {
+        setState(() => _user = updatedUser as Map<String, dynamic>);
+      }
+    });
+  }
+
+  void _showSnack(String msg, {required bool isError}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? _danger : _success,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
 
   // ════════════════════════════════════════════════════
@@ -95,9 +121,9 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
               color: Colors.white,
               border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Profil Saya',
@@ -109,6 +135,24 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
                         style: TextStyle(fontSize: 13, color: _textGrey)),
                   ],
                 ),
+                const Spacer(),
+                // Tombol Edit di topbar
+                if (!_isLoading && !_isGuest)
+                  ElevatedButton.icon(
+                    onPressed: _openEditProfile,
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('Edit Profil',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -116,8 +160,7 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
           // ── Content ──
           Expanded(
             child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: _primary))
+                ? const Center(child: CircularProgressIndicator(color: _primary))
                 : _isGuest
                     ? _buildGuestView()
                     : _buildProfileView(),
@@ -140,7 +183,7 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: _primary.withValues(alpha: 0.08),
+                  color: _primary.withOpacity(0.08),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.person_off_outlined,
@@ -193,7 +236,7 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
                           fontWeight: FontWeight.bold,
                           color: _primary)),
                   style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: _primary.withValues(alpha: 0.4)),
+                    side: BorderSide(color: _primary.withOpacity(0.4)),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
@@ -206,11 +249,11 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
     );
   }
 
-  // ── Profile — layout 2 kolom untuk web ──────────────
+  // ── Profile — layout 2 kolom ─────────────────────────
   Widget _buildProfileView() {
-    final name  = _user?['name']  ?? '-';
-    final email = _user?['email'] ?? '-';
-    final role  = _user?['role']  ?? '-';
+    final name  = _user?['name']  as String? ?? '-';
+    final email = _user?['email'] as String? ?? '-';
+    final role  = _user?['role']  as String? ?? '-';
     final photo = _user?['photo'] as String?;
 
     return Center(
@@ -219,11 +262,10 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
         child: ListView(
           padding: const EdgeInsets.all(32),
           children: [
-            // ── 2-kolom: avatar kiri, menu kanan ──
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Kolom kiri — avatar & identitas
+                // ── Kolom kiri: avatar & identitas ──
                 Expanded(
                   flex: 2,
                   child: Container(
@@ -233,34 +275,32 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
+                          color: Colors.black.withOpacity(0.05),
                           blurRadius: 20,
                         ),
                       ],
                     ),
                     child: Column(
                       children: [
+                        // Avatar
                         Container(
                           width: 100,
                           height: 100,
                           decoration: BoxDecoration(
-                            color: _primary.withValues(alpha: 0.1),
+                            color: _primary.withOpacity(0.1),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: _primary.withValues(alpha: 0.2),
+                              color: _primary.withOpacity(0.2),
                               width: 2,
                             ),
                           ),
                           child: photo != null && photo.startsWith('http')
                               ? ClipOval(
-                                  child: Image.network(
-                                    photo,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(
-                                        Icons.person,
-                                        size: 50,
-                                        color: _primary),
-                                  ),
+                                  child: Image.network(photo,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) =>
+                                          const Icon(Icons.person,
+                                              size: 50, color: _primary)),
                                 )
                               : const Icon(Icons.person,
                                   size: 50, color: _primary),
@@ -270,17 +310,19 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
                             style: const TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
-                                color: _textDark)),
+                                color: _textDark),
+                            textAlign: TextAlign.center),
                         const SizedBox(height: 4),
                         Text(email,
-                            style: TextStyle(
-                                fontSize: 13, color: _textGrey)),
+                            style:
+                                TextStyle(fontSize: 13, color: _textGrey),
+                            textAlign: TextAlign.center),
                         const SizedBox(height: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _primary.withValues(alpha: 0.1),
+                            color: _primary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
@@ -292,14 +334,37 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
                           ),
                         ),
                         const SizedBox(height: 24),
-                        // Logout langsung di card kiri
+
+                        // Edit Profile button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 44,
+                          child: ElevatedButton.icon(
+                            onPressed: _openEditProfile,
+                            icon: const Icon(Icons.edit_outlined,
+                                size: 16, color: Colors.white),
+                            label: const Text('Edit Profil',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _primary,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Logout button
                         SizedBox(
                           width: double.infinity,
                           height: 44,
                           child: OutlinedButton.icon(
                             onPressed: _logout,
                             icon: const Icon(Icons.logout,
-                                color: _danger, size: 18),
+                                color: _danger, size: 16),
                             label: const Text('Keluar',
                                 style: TextStyle(
                                     color: _danger,
@@ -318,32 +383,34 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
 
                 const SizedBox(width: 20),
 
-                // Kolom kanan — menu items
+                // ── Kolom kanan: info & menu ──
                 Expanded(
                   flex: 3,
                   child: Column(
                     children: [
-                      _buildMenuItem(
+                      _buildInfoCard(
+                        icon: Icons.person_outline,
+                        title: 'Nama Lengkap',
+                        value: name,
+                      ),
+                      _buildInfoCard(
                         icon: Icons.email_outlined,
                         title: 'Email',
-                        subtitle: email,
+                        value: email,
                       ),
-                      _buildMenuItem(
+                      _buildInfoCard(
                         icon: Icons.badge_outlined,
                         title: 'Role',
-                        subtitle: role,
+                        value: role.toUpperCase(),
                       ),
+                      const SizedBox(height: 8),
+                      // Edit profile card — shortcut
                       _buildMenuItem(
-                        icon: Icons.history,
-                        title: 'Riwayat Sesi',
-                        subtitle: 'Lihat sesi sebelumnya',
-                        onTap: () {}, // TODO
-                      ),
-                      _buildMenuItem(
-                        icon: Icons.settings_outlined,
-                        title: 'Pengaturan',
-                        subtitle: 'Kelola akun',
-                        onTap: () {}, // TODO
+                        icon: Icons.edit_outlined,
+                        title: 'Edit Profil',
+                        subtitle: 'Ubah nama, email, atau password',
+                        onTap: _openEditProfile,
+                        color: _primary,
                       ),
                     ],
                   ),
@@ -356,12 +423,69 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
     );
   }
 
+  // ── Info card (read-only) ─────────────────────────────
+  Widget _buildInfoCard({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 16,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: _textGrey, size: 20),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: _textGrey,
+                        fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: _textDark),
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Menu item (tappable) ──────────────────────────────
   Widget _buildMenuItem({
     required IconData icon,
     required String title,
     required String subtitle,
     VoidCallback? onTap,
+    Color? color,
   }) {
+    final c = color ?? _textGrey;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -372,8 +496,8 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 20,
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 16,
             ),
           ],
         ),
@@ -382,10 +506,10 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
+                color: c.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(icon, color: _textGrey, size: 22),
+              child: Icon(icon, color: c, size: 20),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -393,8 +517,10 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w600)),
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: c == _textGrey ? _textDark : c)),
                   const SizedBox(height: 2),
                   Text(subtitle,
                       style: TextStyle(fontSize: 13, color: _textGrey),
@@ -403,8 +529,7 @@ class _ProfileWebScreenState extends State<ProfileWebScreen> {
               ),
             ),
             if (onTap != null)
-              const Icon(Icons.arrow_forward_ios,
-                  size: 14, color: Color(0xFF9CA3AF)),
+              Icon(Icons.arrow_forward_ios, size: 14, color: c.withOpacity(0.5)),
           ],
         ),
       ),
