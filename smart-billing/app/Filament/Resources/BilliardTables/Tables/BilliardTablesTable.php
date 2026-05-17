@@ -63,10 +63,14 @@ class BilliardTablesTable
                                     'price'          => $session->package?->price ?? 0,
                                 ]);
 
-                                // Update reservasi terkait jika ada
+                                // 🔥 FIX: update via id_reservations (bukan query by id_billiards)
+                                // dan broadcast ke Flutter agar history langsung update
                                 if ($session->id_reservations) {
-                                    Reservation::where('id', $session->id_reservations)
-                                        ->update(['reservation_status' => 'selesai']);
+                                    $reservation = Reservation::find($session->id_reservations);
+                                    if ($reservation && in_array($reservation->reservation_status, ['berhasil', 'pending'])) {
+                                        $reservation->update(['reservation_status' => 'selesai']);
+                                        broadcast(new \App\Events\ReservationUpdated($reservation->fresh(['billiard', 'package'])));
+                                    }
                                 }
 
                                 // Broadcast ke Flutter agar tombol Stop langsung berubah jadi Start
@@ -190,9 +194,13 @@ class BilliardTablesTable
                                 'price' => $finalPrice
                             ]);
 
-                            // Opsional: Tandai reservasi benar-benar gagal/selesai jika ingin
+                            // 🔥 FIX: 'gagal' diganti 'selesai' — sesi selesai bukan berarti reservasi gagal
                             if ($session->id_reservations) {
-                                Reservation::where('id', $session->id_reservations)->update(['reservation_status' => 'gagal']);
+                                $reservation = Reservation::find($session->id_reservations);
+                                if ($reservation && in_array($reservation->reservation_status, ['berhasil', 'pending'])) {
+                                    $reservation->update(['reservation_status' => 'selesai']);
+                                    broadcast(new \App\Events\ReservationUpdated($reservation->fresh(['billiard', 'package'])));
+                                }
                             }
 
                             event(new TableStatusUpdated($record));

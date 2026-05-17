@@ -109,6 +109,10 @@ class WebSocketService {
     } else if (normalizedEvent == 'App\\Events\\ReservationCreated' ||
                normalizedEvent == 'reservation.created') {
       _reservationController.add(payload);
+    } else if (normalizedEvent == 'App\\Events\\ReservationUpdated' ||
+               normalizedEvent == 'reservation.updated') {
+      // 🔥 FIX: teruskan event update reservasi ke HistoryScreen
+      _reservationController.add(payload);
     } else if (event == 'pusher:pong') {
       // Ignore pong silently
     } else {

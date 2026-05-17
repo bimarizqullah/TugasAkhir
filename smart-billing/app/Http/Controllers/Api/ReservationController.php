@@ -244,12 +244,78 @@ class ReservationController extends Controller
         $reservation = Reservation::where('id_users', $request->user()->id)
             ->findOrFail($id);
 
+        // Status terminal — tidak perlu hit Midtrans lagi
+        if (in_array($reservation->reservation_status, ['selesai', 'gagal'])) {
+            return response()->json([
+                'payment_status'     => $reservation->payment_status,
+                'reservation_status' => $reservation->reservation_status,
+            ]);
+        }
+
+        // Sudah berhasil bayar — kembalikan langsung, jangan hit Midtrans
+        // (mencegah event 'expire' dari Midtrans menimpa status 'berhasil')
+        if ($reservation->reservation_status === 'berhasil') {
+            return response()->json([
+                'payment_status'     => 'settlement',
+                'reservation_status' => 'berhasil',
+            ]);
+        }
+
+        if (!$reservation->payment_order_id) {
+            return response()->json([
+                'payment_status'     => $reservation->payment_status,
+                'reservation_status' => $reservation->reservation_status,
+            ]);
+        }
+
+        try {
+            $response = Http::withBasicAuth($this->midtransServerKey(), '')
+                ->acceptJson()
+                ->get($this->midtransBaseUrl() . '/' . $reservation->payment_order_id . '/status');
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $transactionStatus = $data['transaction_status'] ?? 'pending';
+
+                $paymentStatus = $reservation->payment_status ?? 'pending';
+                $resStatus     = $reservation->reservation_status;
+
+                if (in_array($transactionStatus, ['settlement', 'capture'])) {
+                    $paymentStatus = 'settlement';
+                    $resStatus     = 'berhasil';
+                } elseif (in_array($transactionStatus, ['deny', 'cancel', 'expire'])) {
+                    $paymentStatus = 'failure';
+                    // 🔥 KRITIS: Jangan timpa 'berhasil' atau 'selesai' menjadi 'gagal'
+                    // Event expire dari Midtrans bisa datang terlambat
+                    if (!in_array($resStatus, ['berhasil', 'selesai'])) {
+                        $resStatus = 'gagal';
+                    }
+                }
+
+                // Update DB dan broadcast hanya jika ada perubahan nyata
+                if ($reservation->payment_status !== $paymentStatus ||
+                    $reservation->reservation_status !== $resStatus) {
+                    $reservation->update([
+                        'payment_status'     => $paymentStatus,
+                        'reservation_status' => $resStatus,
+                        'payment_raw'        => $data,
+                    ]);
+                    // Broadcast update ke Flutter (HistoryScreen user lain / tab lain)
+                    broadcast(new ReservationUpdated($reservation->fresh(['billiard', 'package'])));
+                }
+
+                return response()->json([
+                    'payment_status'     => $paymentStatus,
+                    'reservation_status' => $resStatus,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Payment status check failed: ' . $e->getMessage());
+        }
+
         return response()->json([
-            'reservation_id'     => $reservation->id,
-            'reservation_status' => $reservation->reservation_status,
             'payment_status'     => $reservation->payment_status,
-            'payment_expired_at' => $reservation->payment_expired_at,
-            'has_qr'             => $reservation->isQrActive(),
+            'reservation_status' => $reservation->reservation_status,
         ]);
     }
 
@@ -285,11 +351,19 @@ class ReservationController extends Controller
 
         if (in_array($transactionStatus, ['settlement', 'capture'])) {
             if ($fraudStatus === 'accept' || $fraudStatus === null) {
-                $newReservationStatus = 'berhasil';
-                $newPaymentStatus     = 'settlement';
+                // Hanya naik ke 'berhasil' jika belum 'selesai'
+                if ($newReservationStatus !== 'selesai') {
+                    $newReservationStatus = 'berhasil';
+                }
+                $newPaymentStatus = 'settlement';
             }
         } elseif (in_array($transactionStatus, ['cancel', 'deny', 'expire'])) {
-            $newReservationStatus = 'gagal';
+            $newPaymentStatus = 'failure';
+            // 🔥 KRITIS: Jangan timpa 'berhasil' atau 'selesai' dengan 'gagal'
+            // Webhook expire bisa datang terlambat setelah pembayaran sukses
+            if (!in_array($newReservationStatus, ['berhasil', 'selesai'])) {
+                $newReservationStatus = 'gagal';
+            }
         }
 
         $reservation->update([

@@ -414,28 +414,9 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                   ],
                 ),
 
-                // Cancel button
-                if (isMine &&
-                    (status == 'menunggu_konfirmasi' || status == 'dikonfirmasi')) ...[
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: reservId != null
-                          ? () => _cancelReservation(reservId)
-                          : null,
-                      icon: const Icon(Icons.cancel_outlined, size: 16),
-                      label: const Text('Batalkan Reservasi'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _danger,
-                        side: BorderSide(color: _danger.withOpacity(0.5)),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                ],
+                // Antrian hanya berisi reservasi yang sudah lunas (berhasil + settlement)
+                // sehingga tombol batalkan tidak ditampilkan di sini
+
 
                 // Label "Giliran Berikutnya"
                 if (isFirst) ...[
@@ -533,21 +514,15 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'menunggu_konfirmasi': return _warning;
-      case 'dikonfirmasi':        return _success;
-      case 'berhasil':            return _primary;
-      case 'gagal':               return _danger;
-      default:                    return _textGrey;
+      case 'berhasil': return _success;
+      default:         return _textGrey;
     }
   }
 
   String _statusLabel(String status) {
     switch (status) {
-      case 'menunggu_konfirmasi': return 'Menunggu';
-      case 'dikonfirmasi':        return 'Dikonfirmasi';
-      case 'berhasil':            return 'Berhasil';
-      case 'gagal':               return 'Gagal';
-      default:                    return status;
+      case 'berhasil': return 'Lunas';
+      default:         return status;
     }
   }
 }

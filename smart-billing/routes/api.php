@@ -66,6 +66,9 @@ Route::post('/start-session', function (Request $request) {
 // ==========================
 // TABLE STATUS
 // ==========================
+// ==========================
+// TABLE STATUS (PERBAIKAN)
+// ==========================
 Route::get('/table-status/{id}', function ($id) {
     $table = BilliardTable::find($id);
     if (!$table) {
@@ -86,7 +89,20 @@ Route::get('/table-status/{id}', function ($id) {
     $remaining = now()->diffInSeconds($session->end_time, false);
 
     if ($remaining <= 0) {
+        // 1. Update status sesi meja
         $session->update(['session_status' => 'selesai']);
+
+        // 🔥 Hanya reservasi 'berhasil' (sudah bayar) yang diubah ke 'selesai'
+        // Reservasi 'dikonfirmasi' (belum bayar) dibiarkan — jangan diubah di sini
+        \App\Models\Reservation::where('id_billiards', $table->id)
+            ->where('reservation_date', now()->toDateString())
+            ->where('reservation_status', 'berhasil')
+            ->update(['reservation_status' => 'selesai']);
+
+        // Memicu broadcast ke Flutter secara realtime jika diperlukan
+        $table->refresh();
+        broadcast(new \App\Events\TableStatusUpdated($table));
+
         return response()->json([
             'table_name' => $table->name,
             'active'     => false,
@@ -106,6 +122,9 @@ Route::get('/table-status/{id}', function ($id) {
 // ==========================
 // STOP SESSION
 // ==========================
+// ==========================
+// STOP SESSION (PERBAIKAN)
+// ==========================
 Route::post('/stop-session', function (Request $request) {
     $request->validate(['table_id' => 'required|exists:tb_billiards,id']);
 
@@ -116,7 +135,15 @@ Route::post('/stop-session', function (Request $request) {
         return response()->json(['message' => 'Tidak ada sesi aktif'], 404);
     }
 
+    // 1. Update sesi meja
     $session->update(['end_time' => now(), 'session_status' => 'selesai']);
+
+    // 2. Update reservasi: hanya yang sudah 'berhasil' (sudah bayar) → 'selesai'
+    //    Reservasi 'dikonfirmasi' (belum bayar) TIDAK diubah — biarkan user masih bisa bayar
+    \App\Models\Reservation::where('id_billiards', $table->id)
+        ->where('reservation_date', now()->toDateString())
+        ->where('reservation_status', 'berhasil')
+        ->update(['reservation_status' => 'selesai']);
 
     $table->refresh();
     broadcast(new \App\Events\TableStatusUpdated($table));
@@ -185,7 +212,8 @@ Route::get('/tables/{id}/queue', function ($id) {
 
     $queue = \App\Models\Reservation::with(['package'])
         ->where('id_billiards', $id)
-        ->whereNotIn('reservation_status', ['gagal'])
+        ->where('payment_status', 'settlement')        // 🔥 hanya yang sudah lunas
+        ->where('reservation_status', 'berhasil')     // 🔥 hanya yang aktif di antrian
         ->orderBy('reservation_date', 'asc')
         ->orderBy('start_time', 'asc')
         ->get()

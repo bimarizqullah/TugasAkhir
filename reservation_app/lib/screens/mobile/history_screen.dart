@@ -54,9 +54,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
       final newStatus = data['reservation_status']?.toString() ?? '';
 
-      // Notif ke user saat admin approve
       if (newStatus == 'dikonfirmasi') {
         _showApprovalNotif(data);
+      } else if (newStatus == 'berhasil') {
+        _showSnackBar('Pembayaran berhasil! Reservasi dikonfirmasi.', isError: false);
+      } else if (newStatus == 'selesai') {
+        _showSnackBar('Sesi selesai. Terima kasih!', isError: false);
+      } else if (newStatus == 'gagal') {
+        _showSnackBar('Reservasi dibatalkan atau ditolak.', isError: true);
       }
 
       setState(() {
@@ -67,7 +72,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
-  /// Tampilkan banner notifikasi + tombol bayar sekarang
   void _showApprovalNotif(Map<String, dynamic> data) {
     final reservationId = data['id'] as int?;
     if (reservationId == null) return;
@@ -99,7 +103,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  // ── Load reservasi ──────────────────────────────────
   Future<void> _loadReservations() async {
     if (mounted) setState(() => _isLoading = true);
     try {
@@ -131,7 +134,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  // ── Buka PaymentScreen ──────────────────────────────
   Future<void> _openPayment(int reservationId) async {
     final result = await Navigator.push<bool>(
       context,
@@ -142,13 +144,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ),
       ),
     );
-    // Refresh list jika kembali dari payment (misal sudah berhasil)
     if (result == true && mounted) {
       await _loadReservations();
     }
   }
 
-  // ── Cancel ───────────────────────────────────────────
   Future<void> _cancelReservation(dynamic r) async {
     final id   = r['id'] as int;
     final name = r['customer_name']?.toString() ?? 'reservasi ini';
@@ -229,9 +229,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     ));
   }
 
-  // ════════════════════════════════════════════════════
-  //  BUILD
-  // ════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -269,7 +266,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  // ── Card ─────────────────────────────────────────────
   Widget _buildCard(dynamic r) {
     final status = r['reservation_status']?.toString() ?? 'menunggu_konfirmasi';
     final hasActiveQr = r['has_active_qr'] == true;
@@ -277,6 +273,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final statusColor = switch (status) {
       'berhasil'            => _success,
+      'selesai'             => _success,
       'dikonfirmasi'        => _info,
       'menunggu_konfirmasi' => _warning,
       'pending'             => _warning,
@@ -286,6 +283,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final statusLabel = switch (status) {
       'berhasil'            => 'Berhasil',
+      'selesai'             => 'Selesai',
       'dikonfirmasi'        => 'Dikonfirmasi',
       'menunggu_konfirmasi' => 'Menunggu Konfirmasi',
       'pending'             => 'Menunggu',
@@ -295,13 +293,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final statusIcon = switch (status) {
       'berhasil'            => Icons.check_circle_outline,
+      'selesai'             => Icons.task_alt_outlined,
       'dikonfirmasi'        => Icons.thumb_up_outlined,
       'menunggu_konfirmasi' => Icons.access_time_outlined,
       'gagal'               => Icons.cancel_outlined,
       _                     => Icons.help_outline,
     };
 
-    // Format tanggal
     String formattedDate = '-';
     try {
       final raw = r['reservation_date']?.toString() ?? '';
@@ -392,7 +390,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Divider(height: 1, color: Colors.grey.shade100),
             const SizedBox(height: 12),
 
-            // ── Info grid ──
             Row(children: [
               Expanded(child: _buildInfoItem(
                 icon : Icons.table_bar_outlined,
@@ -421,7 +418,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
               )),
             ]),
 
-            // ── Status banner ──
             if (status == 'menunggu_konfirmasi') ...[
               const SizedBox(height: 12),
               _buildStatusBanner(
@@ -448,6 +444,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 message: 'Reservasi & pembayaran berhasil!',
               ),
             ],
+            if (status == 'selesai') ...[
+              const SizedBox(height: 12),
+              _buildStatusBanner(
+                color  : _success,
+                icon   : Icons.task_alt_outlined,
+                message: 'Reservasi telah selesai dijalankan!',
+              ),
+            ],
             if (status == 'gagal') ...[
               const SizedBox(height: 12),
               _buildStatusBanner(
@@ -457,7 +461,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ],
 
-            // ── Payment status jika ada ──
             if (paymentStatus != null &&
                 paymentStatus.isNotEmpty &&
                 status != 'berhasil') ...[
@@ -468,7 +471,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ],
 
-            // ── Tombol ──
             if (status == 'dikonfirmasi') ...[
               const SizedBox(height: 12),
               SizedBox(

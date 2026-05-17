@@ -64,18 +64,15 @@ class Reservation extends Model
             && $this->payment_status === 'pending';
     }
 
-    // ── Broadcast otomatis ───────────────────────────────────────────────
-
-    protected static function booted(): void
-    {
-        static::updated(function (Reservation $reservation) {
-            if ($reservation->wasChanged('reservation_status')) {
-                broadcast(new ReservationUpdated($reservation));
-            }
-        });
-
-        static::created(function (Reservation $reservation) {
-            broadcast(new ReservationUpdated($reservation));
-        });
-    }
+    // ── Broadcast ────────────────────────────────────────────────────────
+    // CATATAN: Broadcast dilakukan secara eksplisit di:
+    //   - ReservationController (store, cancel, handleWebhook, paymentStatus)
+    //   - ReservationsTable (approve, tolak)
+    //
+    // Observer booted() DIHAPUS karena menyebabkan:
+    //   1. Double/triple broadcast (observer + manual broadcast bersamaan)
+    //   2. Race condition — generateQris() update payment fields → observer
+    //      fired lagi dengan data belum lengkap, mengirim payload lama ke Flutter
+    //   3. $reservation->load() di dalam ReservationUpdated constructor
+    //      men-trigger touch internal yang bisa memicu observer ulang
 }

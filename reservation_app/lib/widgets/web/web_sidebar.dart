@@ -88,14 +88,18 @@ class WebSidebar extends StatelessWidget {
             height: 38,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF1D4ED8), Color(0xFF3B82F6)],
+                colors: [Color(0xFFFFFFFF), Color(0xFFFFFFFF)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.sports_bar_rounded,
-                color: Colors.white, size: 20),
+            child: Image.asset(
+                    'assets/images/brand.png', // Sesuaikan nama file
+                    width: 130,  // Atur ukuran sesuai keinginan
+                    height: 130,
+                    fit: BoxFit.contain,
+                  ),
           ),
           const SizedBox(width: 12),
           const Expanded(

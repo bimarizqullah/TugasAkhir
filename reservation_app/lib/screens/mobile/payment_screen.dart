@@ -133,20 +133,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
         final reservationStatus = status['reservation_status'] as String?;
         final paymentStatus     = status['payment_status']     as String?;
 
+        // Pembayaran sukses atau sesi selesai → tampilkan success
         if (reservationStatus == 'berhasil' ||
+            reservationStatus == 'selesai'  ||
             paymentStatus == 'settlement') {
           _pollingTimer?.cancel();
           _countdownTimer?.cancel();
           if (mounted) setState(() => _isPaid = true);
-        } else if (reservationStatus == 'gagal' ||
-            paymentStatus == 'expire' ||
-            paymentStatus == 'cancel') {
+        }
+        // QR kadaluarsa dari Midtrans → expired view (bukan gagal/ditolak)
+        else if (paymentStatus == 'expire' || paymentStatus == 'cancel') {
           _pollingTimer?.cancel();
           _countdownTimer?.cancel();
           if (mounted) setState(() => _isExpired = true);
         }
+        // Reservasi ditolak admin → kembali ke history dengan pesan
+        else if (reservationStatus == 'gagal') {
+          _pollingTimer?.cancel();
+          _countdownTimer?.cancel();
+          if (mounted) {
+            Navigator.pop(context, false); // kembali ke history tanpa reload
+          }
+        }
       } catch (_) {
-        // Abaikan error polling
+        // Abaikan error polling sementara
       }
     });
   }

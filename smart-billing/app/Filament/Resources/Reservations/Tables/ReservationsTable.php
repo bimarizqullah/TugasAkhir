@@ -111,9 +111,10 @@ class ReservationsTable
                         // 2. Generate QRIS via Midtrans
                         self::generateQris($record);
 
-                        // 3. Broadcast ke Flutter
-                        $record->refresh();
-                        broadcast(new ReservationUpdated($record->load(['billiard', 'package'])));
+                        // 3. Broadcast SATU KALI setelah semua update selesai
+                        //    fresh() memastikan semua kolom payment sudah ter-load dari DB
+                        $fresh = $record->fresh(['billiard', 'package']);
+                        broadcast(new ReservationUpdated($fresh));
                     }),
 
                 // ── TOLAK ──

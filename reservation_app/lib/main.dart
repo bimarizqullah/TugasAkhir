@@ -63,7 +63,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title                     : 'Billiard Booking',
+      title                     : 'Reservasi Billiard Etan Patung',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme  : ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),

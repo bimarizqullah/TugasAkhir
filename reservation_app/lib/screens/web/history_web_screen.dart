@@ -224,6 +224,7 @@ class _HistoryWebScreenState extends State<HistoryWebScreen> {
 
   Color    _statusColor(String s) => switch (s) {
     'berhasil'            => _success,
+    'selesai'             => _success,
     'dikonfirmasi'        => _info,
     'menunggu_konfirmasi' => _warning,
     'pending'             => _warning,
@@ -233,6 +234,7 @@ class _HistoryWebScreenState extends State<HistoryWebScreen> {
 
   String   _statusLabel(String s) => switch (s) {
     'berhasil'            => 'Berhasil',
+    'selesai'             => 'Selesai',
     'dikonfirmasi'        => 'Dikonfirmasi',
     'menunggu_konfirmasi' => 'Menunggu',
     'pending'             => 'Menunggu',
@@ -242,6 +244,7 @@ class _HistoryWebScreenState extends State<HistoryWebScreen> {
 
   IconData _statusIcon(String s) => switch (s) {
     'berhasil'            => Icons.check_circle_outline,
+    'selesai'             => Icons.task_alt_outlined,
     'dikonfirmasi'        => Icons.thumb_up_outlined,
     'menunggu_konfirmasi' => Icons.access_time_outlined,
     'gagal'               => Icons.cancel_outlined,
@@ -602,6 +605,8 @@ class _HistoryWebScreenState extends State<HistoryWebScreen> {
                         : 'Reservasi dikonfirmasi. Lanjutkan ke pembayaran.',
                     'berhasil' =>
                       'Reservasi dan pembayaran telah berhasil. Selamat menikmati!',
+                    'selesai' =>
+                      'Reservasi telah selesai dilaksanakan. Terima kasih!',
                     'gagal' =>
                       'Reservasi ini telah dibatalkan atau ditolak oleh admin.',
                     _ => 'Status tidak diketahui.',

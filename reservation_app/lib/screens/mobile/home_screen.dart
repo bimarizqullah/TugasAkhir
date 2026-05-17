@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../services/websocket_service.dart';
 import '../../services/table_service.dart';
 import '../../services/reservation_service.dart';
-import '../../widgets/queue_bottom_sheet.dart'; // 🔥 IMPORT
+import '../../widgets/queue_bottom_sheet.dart'; 
 import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,7 +23,6 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _connSubscription;
   StreamSubscription? _reservationSub;
 
-  // queue count cache: tableId → jumlah antrian
   final Map<int, int> _queueCounts = {};
 
   static const Color _primary     = Color(0xFF2563EB);
@@ -38,7 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _startCountdownTimer();
-    // 🔥 FIX: HAPUS _listenToWebsocket() — subscription diurus di _bootstrap()
     _bootstrap();
   }
 
@@ -55,7 +53,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadTablesWithSession();
     await WebSocketService.connect();
 
-    // 🔥 FIX: Satu subscription saja — tidak ada duplikat
     _wsSubscription = WebSocketService.onTableEvent.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -80,8 +77,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _refreshAllQueueCounts();
     });
   }
-
-  // 🔥 FIX: _listenToWebsocket() DIHAPUS — sudah digabung ke _bootstrap() di atas
 
   void _startCountdownTimer() {
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -108,7 +103,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _lastUpdated = DateTime.now();
       });
 
-      // 🔥 Setelah tabel dimuat, refresh semua queue count
       await _refreshAllQueueCounts();
     } catch (e) {
       print('❌ Load error: $e');
@@ -120,7 +114,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadTables({bool silent = false}) =>
       _loadTablesWithSession(silent: silent);
 
-  /// 🔥 Fetch queue count untuk semua meja sekaligus
   Future<void> _refreshAllQueueCounts() async {
     for (final table in _tables) {
       final id = table['id'];
@@ -129,7 +122,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Fetch queue count untuk 1 meja, update cache tanpa rebuild semua
   Future<void> _fetchQueueCount(int tableId) async {
     if (tableId == 0) return;
     try {
@@ -138,7 +130,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() => _queueCounts[tableId] = count);
     } catch (_) {
-      // Gagal fetch queue — abaikan, tidak crash UI
     }
   }
 
@@ -149,8 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final old = WebSocketService.safeCastMap(_tables[idx]);
       final newSession = Map<String, dynamic>.from(newTable['session'] ?? {});
 
-      // 🔥 FIX: Jika session_status berubah (aktif ↔ tersedia), GANTI session sepenuhnya.
-      // Jangan merge dengan session lama agar start_time/end_time yang obsolete tidak bertahan.
       final oldSessionStatus = old['session_status']?.toString() ?? '';
       final newSessionStatus = newTable['session_status']?.toString() ?? '';
       final sessionChanged   = oldSessionStatus != newSessionStatus;
@@ -195,9 +184,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${(diff / 60).floor()}m ago';
   }
 
-  // ════════════════════════════════════════════════════
-  //  BUILD
-  // ════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -370,9 +356,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ]),
       );
 
-  // ════════════════════════════════════════════════════
-  //  🔥 TABLE CARD — sekarang tappable, ada queue badge
-  // ════════════════════════════════════════════════════
   Widget _buildTableCard(dynamic table) {
     final isActive      = (table['session_status']?.toString() ?? '') == 'aktif';
     final tableStatus   = table['table_status']?.toString() ?? 'aktif';
@@ -386,7 +369,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return GestureDetector(
       onTap: isNonaktif
-          ? null // meja nonaktif tidak bisa diklik
+          ? null 
           : () => QueueBottomSheet.show(
                 context,
                 tableId: tableId,
@@ -457,7 +440,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ? Colors.grey.shade400
                                 : _textGrey),
                       ),
-                      // 🔥 Queue badge
                       if (!isNonaktif && queueCount > 0) ...[
                         const SizedBox(width: 8),
                         Container(
@@ -488,7 +470,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              // Status badge + tap hint icon
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -510,8 +491,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ]),
-
-            // Detail sesi aktif
             if (isActive && !isNonaktif) ...[
               const SizedBox(height: 14),
               const Divider(height: 1, color: Color(0xFFE2E8F0)),
@@ -551,7 +530,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ],
 
-            // Info nonaktif
             if (isNonaktif) ...[
               const SizedBox(height: 10),
               const Divider(height: 1, color: Color(0xFFE2E8F0)),
@@ -738,9 +716,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 }
 
-// ════════════════════════════════════════════════════
-//  Pulse dot widget
-// ════════════════════════════════════════════════════
 class _PulseDot extends StatefulWidget {
   final Color color;
   const _PulseDot({required this.color});
