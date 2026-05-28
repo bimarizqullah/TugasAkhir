@@ -135,105 +135,144 @@ class ReservationController extends Controller
     // ────────────────────────────────────────────
 
     public function initiatePayment(Request $request, int $id): JsonResponse
-    {
-        $reservation = Reservation::with('package')
-            ->where('id_users', $request->user()->id)
-            ->findOrFail($id);
+{
+    $reservation = Reservation::with('package')
+        ->where('id_users', $request->user()->id)
+        ->findOrFail($id);
 
-        // Belum dikonfirmasi admin
-        if ($reservation->reservation_status === 'menunggu_konfirmasi') {
-            return response()->json([
-                'message' => 'Reservasi belum dikonfirmasi admin. Silakan tunggu.',
-                'code'    => 'WAITING_APPROVAL',
-            ], 422);
-        }
+    // Validasi status reservasi (tetap pertahankan kode validasi Anda yang lama)
+    if ($reservation->reservation_status === 'menunggu_konfirmasi') {
+        return response()->json([
+            'message' => 'Reservasi belum dikonfirmasi admin. Silakan tunggu.',
+            'code'    => 'WAITING_APPROVAL',
+        ], 422);
+    }
 
-        // Sudah berhasil bayar
-        if ($reservation->reservation_status === 'berhasil') {
-            return response()->json([
-                'message' => 'Reservasi sudah berhasil dibayar.',
-                'code'    => 'ALREADY_PAID',
-            ], 422);
-        }
+    if ($reservation->reservation_status === 'berhasil') {
+        return response()->json([
+            'message' => 'Reservasi sudah berhasil dibayar.',
+            'code'    => 'ALREADY_PAID',
+        ], 422);
+    }
 
-        // Ditolak / gagal
-        if ($reservation->reservation_status === 'gagal') {
-            return response()->json([
-                'message' => 'Reservasi ini telah dibatalkan.',
-                'code'    => 'CANCELLED',
-            ], 422);
-        }
+    if ($reservation->reservation_status === 'gagal') {
+        return response()->json([
+            'message' => 'Reservasi ini telah dibatalkan.',
+            'code'    => 'CANCELLED',
+        ], 422);
+    }
 
-        // QR sebelumnya masih valid — kembalikan langsung
-        if ($reservation->isQrActive()) {
-            return response()->json([
-                'order_id'   => $reservation->payment_order_id,
-                'qr_string'  => $reservation->payment_qr_string,
-                'qr_url'     => $reservation->payment_qr_url,
-                'expired_at' => $reservation->payment_expired_at,
-                'amount'     => $this->resolveAmount($reservation),
-            ]);
-        }
+    // Kembalikan cached Snap URL jika masih valid DAN memang URL Snap (bukan QRIS image lama)
+    $cachedUrl = $reservation->payment_qr_url ?? '';
+    $isSnapUrl = str_contains($cachedUrl, 'midtrans.com/snap');
+    $isSandbox = config('services.midtrans.is_sandbox', true);
 
-        // Generate QR baru
-        $amount  = $this->resolveAmount($reservation);
-        $orderId = 'RESERVATION-' . $reservation->id . '-' . time();
+    if ($reservation->isQrActive() && $isSnapUrl) {
+        return response()->json([
+            'order_id'       => $reservation->payment_order_id,
+            'token'          => $reservation->payment_qr_string,
+            'redirect_url'   => $cachedUrl,
+            'payment_qr_url' => $cachedUrl,
+            'is_sandbox'     => $isSandbox,
+            'expired_at'     => $reservation->payment_expired_at,
+            'amount'         => $this->resolveAmount($reservation),
+        ]);
+    }
 
-        $payload = [
-            'payment_type'        => 'qris',
-            'transaction_details' => [
-                'order_id'     => $orderId,
-                'gross_amount' => $amount,
-            ],
-            'qris' => ['acquirer' => 'gopay'],
-            'customer_details' => [
-                'first_name' => $reservation->customer_name,
-                'phone'      => $reservation->customer_phone,
-            ],
-            'item_details' => [[
-                'id'       => 'RESERVATION-' . $reservation->id,
-                'price'    => $amount,
-                'quantity' => 1,
-                'name'     => 'Reservasi Meja Billiard',
-            ]],
-        ];
+    $amount  = $this->resolveAmount($reservation);
+    $orderId = 'RESERVATION-' . $reservation->id . '-' . time();
 
-        $response = Http::withBasicAuth($this->midtransServerKey(), '')
-            ->post($this->midtransBaseUrl() . '/charge', $payload);
+    $payload = [
+        'transaction_details' => [
+            'order_id'     => $orderId,
+            'gross_amount' => $amount,
+        ],
+        'customer_details' => [
+            'first_name' => $reservation->customer_name,
+            'phone'      => $reservation->customer_phone,
+        ],
+        'item_details' => [[
+            'id'       => 'RESERVATION-' . $reservation->id,
+            'price'    => $amount,
+            'quantity' => 1,
+            'name'     => 'Reservasi Meja Billiard',
+        ]],
+        'enabled_payments' => ['gopay', 'qris'],
+    ];
 
-        if ($response->failed()) {
-            Log::error('Midtrans charge failed', [
-                'reservation_id' => $reservation->id,
-                'response'       => $response->body(),
-            ]);
-            return response()->json([
-                'message' => 'Gagal menghubungi payment gateway',
-                'detail'  => $response->json('status_message'),
-            ], 502);
-        }
+    $isSandbox   = config('services.midtrans.is_sandbox', true);
+    $snapBaseUrl = $isSandbox
+        ? 'https://app.sandbox.midtrans.com/snap/v1/transactions'
+        : 'https://app.midtrans.com/snap/v1/transactions';
 
-        $data      = $response->json();
-        $qrString  = $data['qr_string']  ?? null;
-        $qrUrl     = $data['qris_url']   ?? ($data['actions'][0]['url'] ?? null);
-        $expiredAt = now()->addMinutes(15);
+    $response = Http::withBasicAuth($this->midtransServerKey(), '')
+        ->acceptJson()
+        ->post($snapBaseUrl, $payload);
 
-        $reservation->update([
-            'payment_order_id'   => $orderId,
-            'payment_qr_string'  => $qrString,
-            'payment_qr_url'     => $qrUrl,
-            'payment_status'     => 'pending',
-            'payment_expired_at' => $expiredAt,
-            'payment_raw'        => $data,
+    if ($response->failed()) {
+        Log::error('Midtrans Snap failed', [
+            'reservation_id' => $reservation->id,
+            'status'         => $response->status(),
+            'response'       => $response->body(),
+        ]);
+        return response()->json([
+            'message' => 'Gagal menghubungi payment gateway',
+            'detail'  => $response->json('error_messages.0') ?? $response->body(),
+        ], 502);
+    }
+
+    $data  = $response->json();
+    $token = $data['token'] ?? null;
+
+    // Snap mengembalikan token + redirect_url
+    // Format: https://app.sandbox.midtrans.com/snap/v2/vtweb/{token}
+    $redirectUrl = $data['redirect_url'] ?? null;
+
+    if (!$redirectUrl && $token) {
+        $redirectUrl = $isSandbox
+            ? "https://app.sandbox.midtrans.com/snap/v2/vtweb/{$token}"
+            : "https://app.midtrans.com/snap/v2/vtweb/{$token}";
+    }
+
+    if (!$redirectUrl) {
+        Log::error('Midtrans Snap response missing redirect_url', [
+            'reservation_id' => $reservation->id,
+            'response_body'  => $response->body(),
         ]);
 
         return response()->json([
-            'order_id'   => $orderId,
-            'qr_string'  => $qrString,
-            'qr_url'     => $qrUrl,
-            'expired_at' => $expiredAt,
-            'amount'     => $amount,
-        ]);
+            'message' => 'Gagal membuat URL pembayaran Midtrans.',
+            'detail'  => $response->json('status_message') ?? $response->body(),
+        ], 502);
     }
+
+    $expiredAt = now()->addMinutes(15);
+
+    $reservation->update([
+        'payment_order_id'   => $orderId,
+        'payment_qr_string'  => $token,
+        'payment_qr_url'     => $redirectUrl,
+        'payment_status'     => 'pending',
+        'payment_expired_at' => $expiredAt,
+        'payment_raw'        => $data,
+    ]);
+
+    Log::info('Midtrans Snap created', [
+        'reservation_id' => $reservation->id,
+        'order_id'       => $orderId,
+        'redirect_url'   => $redirectUrl,
+    ]);
+
+    return response()->json([
+        'order_id'       => $orderId,
+        'token'          => $token,
+        'redirect_url'   => $redirectUrl,
+        'payment_qr_url' => $redirectUrl,
+        'is_sandbox'     => $isSandbox,
+        'expired_at'     => $expiredAt,
+        'amount'         => $amount,
+    ]);
+}
 
     // ────────────────────────────────────────────
     //  4. Cek status pembayaran (Flutter polling)

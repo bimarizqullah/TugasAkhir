@@ -1,18 +1,16 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+// Import kondisional: Hanya gunakan webview_flutter jika dijalankan di Mobile (Android/iOS)
+// Untuk platform Web, kita akan menggunakan penampil berbasis elemen HTML atau deskripsi instruksi.
+import 'package:webview_flutter/webview_flutter.dart' as mobile_wv;
+
 import '../../services/reservation_service.dart';
 
-/// PaymentScreen
-///
-/// Bisa dibuka dari 2 tempat:
-/// 1. Setelah admin approve → via WebSocket event di HistoryScreen
-/// 2. Tap tombol "Lihat QR" di card riwayat
-///
-/// Parameter [reservationId] wajib.
-/// Parameter [fromHistory] = true jika dibuka dari riwayat (tidak redirect setelah sukses).
 class PaymentScreen extends StatefulWidget {
-  final int  reservationId;
+  final int reservationId;
   final bool fromHistory;
 
   const PaymentScreen({
@@ -34,518 +32,381 @@ class _PaymentScreenState extends State<PaymentScreen> {
   static const Color _textGrey = Color(0xFF64748B);
   static const Color _bgColor  = Color(0xFFF8FAFC);
 
-  // State
-  bool   _isLoading   = true;
-  bool   _isPaid      = false;
-  bool   _isExpired   = false;
-  bool   _isWaiting   = false; // belum dikonfirmasi admin
-  String _errorMsg    = '';
+  // State Kontrol
+  bool _isLoading = true;
+  bool _isPaid = false;
+  bool _isExpired = false;
+  bool _isWaiting = false;
+  String _errorMsg = '';
 
-  String? _qrString;
-  String? _orderId;
-  int?    _amount;
-  DateTime? _expiredAt;
+  // Data Pembayaran dari Server
+  String? _redirectUrl; 
+  String? _backendRedirectUrl;
+  String? _backendFallbackUrl;
+  String? _backendToken;
+  int _amount = 0;
+  String _orderId = '';
 
-  Timer? _pollingTimer;
-  Timer? _countdownTimer;
-  int    _remainingSeconds = 0;
+  // Controller dan Timer
+  Timer? _statusTimer;
+  dynamic _webViewController; // Menggunakan dynamic agar aman dari cross-platform type checking
 
   @override
   void initState() {
     super.initState();
-    _loadQr();
+    _loadPaymentUrl();
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
-    _countdownTimer?.cancel();
+    _statusTimer?.cancel();
     super.dispose();
   }
 
-  // ── Load QR ─────────────────────────────────────────
-  Future<void> _loadQr() async {
-    setState(() { _isLoading = true; _errorMsg = ''; });
-    try {
-      final data = await ReservationService.initiatePayment(
-          widget.reservationId);
-
-      if (!mounted) return;
-
-      final expiredAt = data['expired_at'] != null
-          ? DateTime.parse(data['expired_at']).toLocal()
-          : null;
-
-      setState(() {
-        _qrString  = data['qr_string']  as String?;
-        _orderId   = data['order_id']   as String?;
-        _amount    = data['amount']     as int?;
-        _expiredAt = expiredAt;
-        _isLoading = false;
-      });
-
-      if (expiredAt != null) {
-        _startCountdown(expiredAt);
-      }
-      _startPolling();
-    } on ReservationNotApprovedYet {
-      setState(() {
-        _isLoading = false;
-        _isWaiting = true;
-      });
-    } on ReservationAlreadyPaid {
-      setState(() { _isLoading = false; _isPaid = true; });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMsg  = e.toString();
-      });
-    }
-  }
-
-  // ── Countdown ────────────────────────────────────────
-  void _startCountdown(DateTime expiredAt) {
-    _countdownTimer?.cancel();
-    _remainingSeconds = expiredAt.difference(DateTime.now()).inSeconds;
-    if (_remainingSeconds <= 0) {
-      setState(() => _isExpired = true);
-      return;
-    }
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() => _remainingSeconds--);
-      if (_remainingSeconds <= 0) {
-        _countdownTimer?.cancel();
-        setState(() => _isExpired = true);
-        _pollingTimer?.cancel();
-      }
+  Future<void> _loadPaymentUrl() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _errorMsg = '';
+      _isWaiting = false;
+      _isPaid = false;
+      _isExpired = false;
     });
+
+    try {
+      final res = await ReservationService.initiatePayment(widget.reservationId);
+
+      _backendRedirectUrl = res['redirect_url'] as String?;
+      _backendFallbackUrl = res['payment_qr_url'] as String?;
+      _backendToken = res['token']?.toString();
+      _redirectUrl = _backendRedirectUrl ?? _backendFallbackUrl;
+      final isSandbox = res['is_sandbox'] == true || res['is_sandbox']?.toString() == 'true';
+
+      if ((_redirectUrl == null || _redirectUrl!.isEmpty) && _backendToken != null && _backendToken!.isNotEmpty) {
+        _redirectUrl = isSandbox
+            ? 'https://app.sandbox.midtrans.com/snap/v2/vtweb/${_backendToken!}'
+            : 'https://app.midtrans.com/snap/v2/vtweb/${_backendToken!}';
+      }
+
+      _amount = res['amount'] ?? 0;
+      _orderId = res['order_id'] ?? '';
+
+      if (_redirectUrl == null || _redirectUrl!.isEmpty) {
+        throw Exception(
+          'Gagal mendapatkan URL pembayaran dari server. ' 
+          'backend returned redirect_url=${_backendRedirectUrl ?? '<null>'}, ' 
+          'payment_qr_url=${_backendFallbackUrl ?? '<null>'}, ' 
+          'token=${_backendToken ?? '<null>'}'
+        );
+      }
+
+      // Inisialisasi WebViewController hanya jika berjalan di Mobile asli (bukan di platform Web)
+      if (!kIsWeb) {
+        _webViewController = mobile_wv.WebViewController()
+          ..setJavaScriptMode(mobile_wv.JavaScriptMode.unrestricted)
+          ..setBackgroundColor(const Color(0x00000000))
+          ..setNavigationDelegate(
+            mobile_wv.NavigationDelegate(
+              onWebResourceError: (mobile_wv.WebResourceError error) {
+                debugPrint("WebView Error: ${error.description}");
+              },
+            ),
+          )
+          ..loadRequest(Uri.parse(_redirectUrl!));
+      }
+
+      _startStatusPolling();
+    } on ReservationNotApprovedYet {
+      _isWaiting = true;
+    } on ReservationAlreadyPaid {
+      _isPaid = true;
+    } catch (e) {
+      _errorMsg = e.toString().replaceAll('Exception: ', '');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
-  // ── Polling status ───────────────────────────────────
-  void _startPolling() {
-    _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      if (!mounted) return;
+  void _startStatusPolling() {
+    _statusTimer?.cancel();
+    _statusTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
       try {
-        final status = await ReservationService.checkPaymentStatus(
-            widget.reservationId);
-        final reservationStatus = status['reservation_status'] as String?;
-        final paymentStatus     = status['payment_status']     as String?;
+        final statusRes = await ReservationService.checkPaymentStatus(widget.reservationId);
+        final status = statusRes['payment_status'] ?? 'pending';
 
-        // Pembayaran sukses atau sesi selesai → tampilkan success
-        if (reservationStatus == 'berhasil' ||
-            reservationStatus == 'selesai'  ||
-            paymentStatus == 'settlement') {
-          _pollingTimer?.cancel();
-          _countdownTimer?.cancel();
-          if (mounted) setState(() => _isPaid = true);
-        }
-        // QR kadaluarsa dari Midtrans → expired view (bukan gagal/ditolak)
-        else if (paymentStatus == 'expire' || paymentStatus == 'cancel') {
-          _pollingTimer?.cancel();
-          _countdownTimer?.cancel();
-          if (mounted) setState(() => _isExpired = true);
-        }
-        // Reservasi ditolak admin → kembali ke history dengan pesan
-        else if (reservationStatus == 'gagal') {
-          _pollingTimer?.cancel();
-          _countdownTimer?.cancel();
+        if (status == 'berhasil' || status == 'settlement') {
+          timer.cancel();
           if (mounted) {
-            Navigator.pop(context, false); // kembali ke history tanpa reload
+            setState(() {
+              _isPaid = true;
+            });
+          }
+        } else if (status == 'gagal' || status == 'expire') {
+          timer.cancel();
+          if (mounted) {
+            setState(() {
+              _isExpired = true;
+            });
           }
         }
-      } catch (_) {
-        // Abaikan error polling sementara
+      } catch (e) {
+        debugPrint('Gagal sinkronisasi pooling status: $e');
       }
     });
   }
 
-  String _formatCountdown() {
-    final m = (_remainingSeconds ~/ 60).toString().padLeft(2, '0');
-    final s = (_remainingSeconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  String _formatRupiah(int amount) {
-    final str = amount.toString();
-    final buffer = StringBuffer('Rp');
-    var count = 0;
-    for (var i = str.length - 1; i >= 0; i--) {
-      if (count > 0 && count % 3 == 0) buffer.write('.');
-      buffer.write(str[i]);
-      count++;
+  Future<void> _openPaymentInBrowser() async {
+    if (_redirectUrl == null || _redirectUrl!.isEmpty) return;
+    final uri = Uri.parse(_redirectUrl!);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
-    return buffer.toString().split('').reversed.join();
   }
 
-  // ════════════════════════════════════════════════════
-  //  BUILD
-  // ════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor          : Colors.transparent,
-        elevation                : 0,
-        automaticallyImplyLeading: false,
+        title: const Text(
+          'Pembayaran Transaksi', 
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)
+        ),
+        centerTitle: true,
+        backgroundColor: _primary,
+        elevation: 0,
         leading: IconButton(
-          icon     : const Icon(Icons.arrow_back, color: _textDark),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Pembayaran QRIS',
-            style: TextStyle(
-                color: _textDark, fontWeight: FontWeight.bold)),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _primary))
-          : _isPaid
-              ? _buildSuccessView()
-              : _isWaiting
-                  ? _buildWaitingView()
-                  : _isExpired
-                      ? _buildExpiredView()
-                      : _errorMsg.isNotEmpty
-                          ? _buildErrorView()
-                          : _buildQrView(),
+      body: _buildBody(),
     );
   }
 
-  // ── QR View ──────────────────────────────────────────
-  Widget _buildQrView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(children: [
-        // Nominal
-        if (_amount != null) ...[
-          Container(
-            width      : double.infinity,
-            padding    : const EdgeInsets.all(16),
-            decoration : BoxDecoration(
-              color       : _primary.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _primary.withValues(alpha: 0.15)),
-            ),
-            child: Column(children: [
-              Text('Total Pembayaran',
-                  style:
-                      TextStyle(fontSize: 12, color: _textGrey)),
-              const SizedBox(height: 4),
-              Text(
-                _formatRupiah(_amount!),
-                style: const TextStyle(
-                    fontSize  : 24,
-                    fontWeight: FontWeight.bold,
-                    color     : _primary),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 20),
-        ],
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_primary)),
+      );
+    }
+    
+    if (_isWaiting) {
+      return _buildStateView(
+        Icons.hourglass_empty, 
+        _warning, 
+        'Menunggu Persetujuan', 
+        'Pemesanan Anda belum disetujui oleh admin. Silakan cek riwayat Anda secara berkala.'
+      );
+    }
+    
+    if (_isPaid) {
+      return _buildStateView(
+        Icons.check_circle_outline, 
+        _success, 
+        'Pembayaran Berhasil', 
+        'Terima kasih, pembayaran terverifikasi. Silakan menuju meja billiard sesuai pesanan Anda.', 
+        sukses: true
+      );
+    }
+    
+    if (_isExpired) {
+      return _buildStateView(
+        Icons.cancel_outlined, 
+        _danger, 
+        'Batas Waktu Habis', 
+        'Waktu transaksi pembayaran ini telah kedaluwarsa.'
+      );
+    }
+    
+    if (_errorMsg.isNotEmpty) {
+      return _buildErrorView();
+    }
 
-        // QR Code
-        if (_qrString != null) ...[
-          Container(
-            padding   : const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color       : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow   : [
-                BoxShadow(
-                  color     : Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 20,
-                  offset    : const Offset(0, 4),
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Order ID: $_orderId', style: const TextStyle(fontSize: 11, color: _textGrey)),
+                  const SizedBox(height: 2),
+                  const Text('Total Tagihan', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textDark)),
+                ],
+              ),
+              Text(
+                'Rp ${_amount.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _warning),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+        Expanded(
+          child: kIsWeb
+              ? _buildWebPaymentPlaceholder()
+              : (_webViewController != null
+                  ? mobile_wv.WebViewWidget(controller: _webViewController as mobile_wv.WebViewController)
+                  : _buildOpenExternalButton()),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOpenExternalButton() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.open_in_new, size: 48, color: _primary),
+            const SizedBox(height: 16),
+            const Text(
+              'Buka Pembayaran Midtrans',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _textDark),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Jika WebView tidak tersedia, Anda dapat membuka halaman pembayaran di browser eksternal.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: _textGrey, height: 1.4),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton(
+                onPressed: _openPaymentInBrowser,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('Buka di Browser', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Tampilan penampung khusus saat sistem di-build di platform Web (Menghindari error plugin)
+  Widget _buildWebPaymentPlaceholder() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.open_in_new, size: 48, color: _primary),
+                const SizedBox(height: 16),
+                const Text(
+                  'Selesaikan Pembayaran',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _textDark),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Sistem Midtrans Snap eksternal mendeteksi Anda membuka aplikasi melalui browser web.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: _textGrey, height: 1.4),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton(
+                    onPressed: _openPaymentInBrowser,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _primary,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: const Text('Buka di Tab Baru', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
                 ),
               ],
             ),
-            child: QrImageView(
-              data           : _qrString!,
-              version        : QrVersions.auto,
-              size           : 240,
-              backgroundColor: Colors.white,
-            ),
           ),
-          const SizedBox(height: 16),
-
-          // Countdown
-          if (!_isExpired && _remainingSeconds > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: _remainingSeconds < 60
-                    ? _danger.withValues(alpha: 0.08)
-                    : _warning.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.timer_outlined,
-                      size : 16,
-                      color: _remainingSeconds < 60 ? _danger : _warning,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Kadaluarsa dalam ${_formatCountdown()}',
-                      style: TextStyle(
-                        fontSize  : 13,
-                        fontWeight: FontWeight.w600,
-                        color     : _remainingSeconds < 60
-                            ? _danger
-                            : _warning,
-                      ),
-                    ),
-                  ]),
-            ),
-        ],
-
-        const SizedBox(height: 20),
-
-        // Instruksi
-        _buildInstruction(),
-
-        const SizedBox(height: 16),
-
-        // Order ID
-        if (_orderId != null)
-          Text(
-            'Order ID: $_orderId',
-            style: TextStyle(fontSize: 11, color: _textGrey),
-          ),
-      ]),
+        ),
+      ),
     );
   }
 
-  Widget _buildInstruction() {
-    return Container(
-      padding   : const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color       : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Cara Pembayaran:',
-              style: TextStyle(
-                  fontSize  : 13,
-                  fontWeight: FontWeight.bold,
-                  color     : _textDark)),
-          const SizedBox(height: 10),
-          ...[
-            'Buka aplikasi m-banking atau e-wallet kamu',
-            'Pilih menu Scan QR / QRIS',
-            'Scan kode QR di atas',
-            'Konfirmasi pembayaran',
-            'Halaman ini akan otomatis terupdate',
-          ].asMap().entries.map((e) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width : 20,
-                      height: 20,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color : _primary,
-                        shape : BoxShape.circle,
-                      ),
-                      child: Text(
-                        '${e.key + 1}',
-                        style: const TextStyle(
-                            fontSize: 10,
-                            color   : Colors.white,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(e.value,
-                          style: const TextStyle(
-                              fontSize: 12, color: _textDark)),
-                    ),
-                  ],
+  Widget _buildStateView(IconData icon, Color color, String title, String desc, {bool sukses = false}) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center, 
+          children: [
+            Icon(icon, size: 72, color: color),
+            const SizedBox(height: 16),
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _textDark)),
+            const SizedBox(height: 8),
+            Text(desc, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: _textGrey, height: 1.4)),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton(
+                onPressed: () {
+                  if (widget.fromHistory || sukses) {
+                    Navigator.pop(context);
+                  } else {
+                    Navigator.of(context).popUntil((route) => route.isFirst);
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-              )),
-        ],
-      ),
-    );
-  }
-
-  // ── Success View ─────────────────────────────────────
-  Widget _buildSuccessView() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-            padding   : const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: _success.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.check_circle_outline,
-                size: 72, color: _success),
-          ),
-          const SizedBox(height: 24),
-          const Text('Pembayaran Berhasil!',
-              style: TextStyle(
-                  fontSize  : 22,
-                  fontWeight: FontWeight.bold,
-                  color     : _textDark)),
-          const SizedBox(height: 8),
-          Text('Reservasi kamu sudah dikonfirmasi.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: _textGrey)),
-          const SizedBox(height: 32),
-          SizedBox(
-            width : double.infinity,
-            height: 50,
-            child : ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _success,
-                foregroundColor: Colors.white,
-                elevation      : 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                child: const Text('Kembali ke Riwayat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
-              child: const Text('Selesai',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.bold)),
             ),
-          ),
-        ]),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Waiting View (belum approve) ─────────────────────
-  Widget _buildWaitingView() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-            padding   : const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: _warning.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.hourglass_top_outlined,
-                size: 72, color: _warning),
-          ),
-          const SizedBox(height: 24),
-          const Text('Menunggu Konfirmasi',
-              style: TextStyle(
-                  fontSize  : 22,
-                  fontWeight: FontWeight.bold,
-                  color     : _textDark)),
-          const SizedBox(height: 8),
-          Text(
-            'Reservasimu sedang menunggu persetujuan admin.\n'
-            'QR pembayaran akan muncul otomatis setelah dikonfirmasi.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: _textGrey, height: 1.5),
-          ),
-          const SizedBox(height: 32),
-          SizedBox(
-            width : double.infinity,
-            height: 50,
-            child : OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                side : const BorderSide(color: _primary),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('Kembali ke Riwayat',
-                  style: TextStyle(color: _primary, fontSize: 15)),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  // ── Expired View ─────────────────────────────────────
-  Widget _buildExpiredView() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-            padding   : const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: _danger.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.timer_off_outlined,
-                size: 72, color: _danger),
-          ),
-          const SizedBox(height: 24),
-          const Text('QR Kadaluarsa',
-              style: TextStyle(
-                  fontSize  : 22,
-                  fontWeight: FontWeight.bold,
-                  color     : _textDark)),
-          const SizedBox(height: 8),
-          Text('Waktu pembayaran habis.\nSilakan hubungi admin untuk generate QR baru.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: _textGrey, height: 1.5)),
-          const SizedBox(height: 32),
-          SizedBox(
-            width : double.infinity,
-            height: 50,
-            child : OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                side : const BorderSide(color: _danger),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('Kembali',
-                  style: TextStyle(color: _danger, fontSize: 15)),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  // ── Error View ───────────────────────────────────────
   Widget _buildErrorView() {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.error_outline, size: 72,
-              color: _danger.withValues(alpha: 0.7)),
-          const SizedBox(height: 16),
-          const Text('Terjadi Kesalahan',
-              style: TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.bold, color: _textDark)),
-          const SizedBox(height: 8),
-          Text(_errorMsg,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: _textGrey)),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _loadQr,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _primary,
-              foregroundColor: Colors.white,
-              elevation      : 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center, 
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: _danger),
+            const SizedBox(height: 12),
+            const Text('Gagal Memuat Transaksi', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _textDark)),
+            const SizedBox(height: 6),
+            Text(_errorMsg, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: _textGrey)),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _loadPaymentUrl,
+              style: ElevatedButton.styleFrom(backgroundColor: _primary, foregroundColor: Colors.white),
+              child: const Text('Ulangi Proses'),
             ),
-            child: const Text('Coba Lagi'),
-          ),
-        ]),
+          ],
+        ),
       ),
     );
   }
