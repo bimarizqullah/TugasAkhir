@@ -25,10 +25,6 @@ class ReportResource extends Resource
     protected static string|UnitEnum|null $navigationGroup = 'Laporan Transaksi';
     protected static ?string $recordTitleAttribute = 'id';
 
-    public static function form(Schema $schema): Schema
-    {
-        return ReportForm::configure($schema);
-    }
 
     public static function table(Table $table): Table
     {

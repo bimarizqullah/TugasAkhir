@@ -48,6 +48,11 @@ class TableSession extends Model
         return $this->belongsTo(\App\Models\User::class, 'created_by');
     }
 
+    public function reservation()
+    {
+        return $this->belongsTo(\App\Models\Reservation::class, 'id_reservations');
+    }
+
     // 🔥 HELPER — Ambil harga final
     public function getHargaFinal(): int
     {
